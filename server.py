@@ -56,11 +56,18 @@ try:
     import proto
     logger.debug(f"Proto package found at: {proto.__file__}")
     
-    # Import from proto package (files are in proto/ directory)
-    import proto.health_pb2 as health_pb2
-    import proto.health_pb2_grpc as health_pb2_grpc
+    # Verify proto.health_pb2 can be imported
+    # Use importlib to ensure we're importing from the correct location
+    import importlib
+    health_pb2_module = importlib.import_module('proto.health_pb2')
+    health_pb2_grpc_module = importlib.import_module('proto.health_pb2_grpc')
+    
+    # Assign to expected names
+    health_pb2 = health_pb2_module
+    health_pb2_grpc = health_pb2_grpc_module
+    
     logger.info("Successfully imported gRPC code from proto package")
-except ImportError as e:
+except (ImportError, ModuleNotFoundError) as e:
     logger.error(f"Failed to import generated gRPC code: {e}")
     logger.error(f"Exception type: {type(e).__name__}")
     logger.error(f"Python path: {sys.path}")
