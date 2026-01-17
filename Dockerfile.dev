@@ -29,6 +29,11 @@ RUN python3 -m grpc_tools.protoc \
     --proto_path=proto \
     proto/health.proto
 
+# Fix import in health_pb2_grpc.py - it imports health_pb2 without proto. prefix
+# We need to change it to import proto.health_pb2
+RUN sed -i 's/^import health_pb2 as health__pb2$/import proto.health_pb2 as health__pb2/' proto/health_pb2_grpc.py || true
+RUN sed -i 's/^from health_pb2/from proto.health_pb2/' proto/health_pb2_grpc.py || true
+
 # Copy application code
 COPY server.py .
 
