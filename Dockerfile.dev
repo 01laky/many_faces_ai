@@ -21,6 +21,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY proto/ proto/
 
 # Generate Python gRPC code from proto files
+# This creates proto/health_pb2.py and proto/health_pb2_grpc.py
 RUN python3 -m grpc_tools.protoc \
     --python_out=. \
     --grpc_python_out=. \
@@ -29,6 +30,9 @@ RUN python3 -m grpc_tools.protoc \
 
 # Copy application code
 COPY server.py .
+
+# Create proto/__init__.py if it doesn't exist (allows proto to be imported as package)
+RUN touch proto/__init__.py || true
 
 # Make server.py executable
 RUN chmod +x server.py
