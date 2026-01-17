@@ -45,4 +45,5 @@ EXPOSE 50051
 ENV PORT=50051
 
 # Run the server
-CMD ["python", "server.py"]
+# Use python -m to run as module, which ensures proper path handling
+CMD ["python", "-m", "server"]
