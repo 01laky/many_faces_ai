@@ -52,18 +52,24 @@ logger.debug(f"Current directory: {os.getcwd()}")
 logger.debug(f"App directory: {app_dir}")
 
 try:
-    # First, try to import proto package to verify it exists
-    import proto
-    logger.debug(f"Proto package found at: {proto.__file__}")
+    # Use importlib.util to load modules directly from file paths
+    # This is more reliable than regular imports when path handling is complex
+    import importlib.util
     
-    # Use importlib.import_module for more reliable imports
-    # This works better when the script is executed directly
-    import importlib
-    health_pb2 = importlib.import_module('proto.health_pb2')
-    health_pb2_grpc = importlib.import_module('proto.health_pb2_grpc')
+    # Load health_pb2 from file path
+    health_pb2_path = os.path.join(app_dir, 'proto', 'health_pb2.py')
+    health_pb2_spec = importlib.util.spec_from_file_location('proto.health_pb2', health_pb2_path)
+    health_pb2 = importlib.util.module_from_spec(health_pb2_spec)
+    health_pb2_spec.loader.exec_module(health_pb2)
+    
+    # Load health_pb2_grpc from file path
+    health_pb2_grpc_path = os.path.join(app_dir, 'proto', 'health_pb2_grpc.py')
+    health_pb2_grpc_spec = importlib.util.spec_from_file_location('proto.health_pb2_grpc', health_pb2_grpc_path)
+    health_pb2_grpc = importlib.util.module_from_spec(health_pb2_grpc_spec)
+    health_pb2_grpc_spec.loader.exec_module(health_pb2_grpc)
     
     logger.info("Successfully imported gRPC code from proto package")
-except (ImportError, ModuleNotFoundError) as e:
+except (ImportError, ModuleNotFoundError, FileNotFoundError) as e:
     logger.error(f"Failed to import generated gRPC code: {e}")
     logger.error(f"Exception type: {type(e).__name__}")
     logger.error(f"Python path: {sys.path}")
