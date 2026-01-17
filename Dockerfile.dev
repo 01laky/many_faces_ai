@@ -22,9 +22,10 @@ COPY proto/ proto/
 
 # Generate Python gRPC code from proto files
 # This creates proto/health_pb2.py and proto/health_pb2_grpc.py
+# Output is set to proto/ directory to match the import path in server.py
 RUN python3 -m grpc_tools.protoc \
-    --python_out=. \
-    --grpc_python_out=. \
+    --python_out=proto \
+    --grpc_python_out=proto \
     --proto_path=proto \
     proto/health.proto
 
