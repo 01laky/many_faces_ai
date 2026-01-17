@@ -45,13 +45,24 @@ os.chdir(os.path.abspath(app_dir))
 # They are also generated during Docker build in Dockerfile.dev
 # The files are generated into proto/ directory, so we import from proto package
 # proto/__init__.py is created in Dockerfile to make it a Python package
+
+# Debug: Log current state before import
+logger.debug(f"Python path: {sys.path[:3]}")
+logger.debug(f"Current directory: {os.getcwd()}")
+logger.debug(f"App directory: {app_dir}")
+
 try:
+    # First, try to import proto package to verify it exists
+    import proto
+    logger.debug(f"Proto package found at: {proto.__file__}")
+    
     # Import from proto package (files are in proto/ directory)
     import proto.health_pb2 as health_pb2
     import proto.health_pb2_grpc as health_pb2_grpc
     logger.info("Successfully imported gRPC code from proto package")
 except ImportError as e:
     logger.error(f"Failed to import generated gRPC code: {e}")
+    logger.error(f"Exception type: {type(e).__name__}")
     logger.error(f"Python path: {sys.path}")
     logger.error(f"Current directory: {os.getcwd()}")
     logger.error(f"App directory: {app_dir}")
