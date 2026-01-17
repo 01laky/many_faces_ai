@@ -25,13 +25,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Add current directory to Python path to allow imports
-# This ensures that proto/ directory can be imported as a package
+# Get the directory where this script is located
 app_dir = os.path.dirname(os.path.abspath(__file__))
+
+# Add app directory to Python path to allow imports
+# This ensures that proto/ directory can be imported as a package
 if app_dir not in sys.path:
     sys.path.insert(0, app_dir)
 
 # Change to app directory to ensure relative imports work correctly
+# This is important for Python to find the proto package
 os.chdir(app_dir)
 
 # Import generated gRPC code
