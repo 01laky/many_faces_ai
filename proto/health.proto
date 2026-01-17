@@ -1,0 +1,28 @@
+// health.proto - gRPC service definition for health check
+// This proto file defines the health check service used to verify AI service availability
+
+syntax = "proto3";
+
+package health;
+
+// Health service provides health check functionality
+service HealthService {
+  // HealthCheck checks if the service is running and ready
+  // Returns success if the service is operational
+  rpc HealthCheck (HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+// Request message for health check
+message HealthCheckRequest {
+  // Optional: can include additional check parameters in the future
+}
+
+// Response message for health check
+message HealthCheckResponse {
+  // Status of the health check
+  // "success" indicates the service is running and ready
+  string status = 1;
+  
+  // Optional: additional status message
+  string message = 2;
+}

@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""
+server.py - gRPC server for AI Demo service
+
+This server provides a health check endpoint via gRPC.
+The server listens on port 50051 by default (configurable via PORT environment variable).
+
+Usage:
+    python server.py
+    or
+    ./server.py
+"""
+
+import os
+import sys
+import logging
+from concurrent import futures
+
+import grpc
+
+# Import generated gRPC code
+import proto.health_pb2 as health_pb2
+import proto.health_pb2_grpc as health_pb2_grpc
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+
+class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
+    """
+    Implementation of the HealthService gRPC service.
+    
+    This class handles health check requests from clients.
+    """
+    
+    def HealthCheck(self, request, context):
+        """
+        Health check RPC method.
+        
+        This method is called when a client requests a health check.
+        It returns a success response if the server is running and ready.
+        
+        Args:
+            request: HealthCheckRequest message (currently unused)
+            context: gRPC context
+            
+        Returns:
+            HealthCheckResponse with status="success" if server is operational
+        """
+        logger.info("Health check requested")
+        
+        # Return success response indicating server is running and ready
+        return health_pb2.HealthCheckResponse(
+            status="success",
+            message="AI Demo service is running and ready"
+        )
+
+
+def serve():
+    """
+    Start the gRPC server.
+    
+    The server listens on the port specified by the PORT environment variable,
+    or defaults to 50051 if not set.
+    """
+    # Get port from environment variable or use default
+    port = os.getenv('PORT', '50051')
+    server_address = f'0.0.0.0:{port}'
+    
+    logger.info(f"Starting gRPC server on {server_address}")
+    
+    # Create gRPC server with thread pool executor
+    # max_workers: number of threads to handle concurrent requests
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    
+    # Add HealthService to the server
+    health_pb2_grpc.add_HealthServiceServicer_to_server(
+        HealthServiceServicer(), server
+    )
+    
+    # Add insecure port (for development - use TLS in production)
+    server.add_insecure_port(server_address)
+    
+    # Start the server
+    server.start()
+    logger.info(f"gRPC server started on {server_address}")
+    
+    try:
+        # Keep the server running
+        server.wait_for_termination()
+    except KeyboardInterrupt:
+        logger.info("Shutting down server...")
+        server.stop(0)
+        logger.info("Server stopped")
+
+
+if __name__ == '__main__':
+    serve()
