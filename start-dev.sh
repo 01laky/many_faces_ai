@@ -18,9 +18,11 @@ if ! docker info > /dev/null 2>&1; then
 fi
 
 # Generate proto files if they don't exist
+# Note: Proto generation happens in Docker container during build
+# If files don't exist locally, they will be generated in the container
 if [ ! -f "proto/health_pb2.py" ] || [ ! -f "proto/health_pb2_grpc.py" ]; then
-    echo "📦 Generating gRPC code from proto files..."
-    ./generate_proto.sh
+    echo "⚠️  Proto files not found locally. They will be generated in Docker container during build."
+    echo "   This is normal - proto generation happens in Dockerfile.dev"
 fi
 
 # Start container using root docker-compose
