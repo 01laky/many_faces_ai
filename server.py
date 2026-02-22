@@ -11,17 +11,16 @@ Usage:
     ./server.py
 """
 
+import logging
 import os
 import sys
-import logging
 from concurrent import futures
 
 import grpc
 
 # Configure logging FIRST, before any other imports that might use logger
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -55,19 +54,21 @@ try:
     # Use importlib.util to load modules directly from file paths
     # This is more reliable than regular imports when path handling is complex
     import importlib.util
-    
+
     # Load health_pb2 from file path
-    health_pb2_path = os.path.join(app_dir, 'proto', 'health_pb2.py')
-    health_pb2_spec = importlib.util.spec_from_file_location('proto.health_pb2', health_pb2_path)
+    health_pb2_path = os.path.join(app_dir, "proto", "health_pb2.py")
+    health_pb2_spec = importlib.util.spec_from_file_location("proto.health_pb2", health_pb2_path)
     health_pb2 = importlib.util.module_from_spec(health_pb2_spec)
     health_pb2_spec.loader.exec_module(health_pb2)
-    
+
     # Load health_pb2_grpc from file path
-    health_pb2_grpc_path = os.path.join(app_dir, 'proto', 'health_pb2_grpc.py')
-    health_pb2_grpc_spec = importlib.util.spec_from_file_location('proto.health_pb2_grpc', health_pb2_grpc_path)
+    health_pb2_grpc_path = os.path.join(app_dir, "proto", "health_pb2_grpc.py")
+    health_pb2_grpc_spec = importlib.util.spec_from_file_location(
+        "proto.health_pb2_grpc", health_pb2_grpc_path
+    )
     health_pb2_grpc = importlib.util.module_from_spec(health_pb2_grpc_spec)
     health_pb2_grpc_spec.loader.exec_module(health_pb2_grpc)
-    
+
     logger.info("Successfully imported gRPC code from proto package")
 except (ImportError, ModuleNotFoundError, FileNotFoundError) as e:
     logger.error(f"Failed to import generated gRPC code: {e}")
@@ -76,7 +77,7 @@ except (ImportError, ModuleNotFoundError, FileNotFoundError) as e:
     logger.error(f"Current directory: {os.getcwd()}")
     logger.error(f"App directory: {app_dir}")
     # Try to list proto directory contents for debugging
-    proto_dir = os.path.join(app_dir, 'proto')
+    proto_dir = os.path.join(app_dir, "proto")
     if os.path.exists(proto_dir):
         logger.error(f"Proto directory exists: {proto_dir}")
         try:
@@ -85,69 +86,109 @@ except (ImportError, ModuleNotFoundError, FileNotFoundError) as e:
         except Exception as list_error:
             logger.error(f"Could not list proto directory: {list_error}")
     logger.error("Please run ./generate_proto.sh to generate the required files")
-    logger.error("Or ensure Docker build completed successfully (proto files are generated during build)")
+    logger.error(
+        "Or ensure Docker build completed successfully (proto files are generated during build)"
+    )
     sys.exit(1)
+
+# Import AI model service – communicates with local DistilGPT-2 model
+try:
+    from services.ai_model_service import AIModelService
+
+    _ai_service = AIModelService()
+    logger.info("AIModelService ready (model will load on first Generate request)")
+except ImportError as e:
+    logger.warning("AIModelService not available: %s – Generate RPC will not work", e)
+    _ai_service = None
 
 
 class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
     """
     Implementation of the HealthService gRPC service.
-    
+
     This class handles health check requests from clients.
     """
-    
+
     def HealthCheck(self, request, context):
         """
         Health check RPC method.
-        
+
         This method is called when a client requests a health check.
         It returns a success response if the server is running and ready.
-        
+
         Args:
             request: HealthCheckRequest message (currently unused)
             context: gRPC context
-            
+
         Returns:
             HealthCheckResponse with status="success" if server is operational
         """
         logger.info("Health check requested")
-        
+
         # Return success response indicating server is running and ready
         return health_pb2.HealthCheckResponse(
-            status="success",
-            message="AI Demo service is running and ready"
+            status="success", message="AI Demo service is running and ready"
         )
+
+    def Generate(self, request, context):
+        """
+        AI text generation RPC method.
+
+        Completes the given prompt using the local DistilGPT-2 model.
+        The model is loaded into memory on first call (lazy loading).
+
+        Args:
+            request: GenerateRequest with prompt and optional max_new_tokens
+            context: gRPC context
+
+        Returns:
+            GenerateResponse with generated text (text field) or error message (error field)
+        """
+        logger.info("Generate requested, prompt length=%d", len(request.prompt or ""))
+        if _ai_service is None:
+            return health_pb2.GenerateResponse(
+                text="",
+                error="AIModelService not available (transformers/torch not installed or import failed)",
+            )
+        prompt = (request.prompt or "").strip()
+        if not prompt:
+            return health_pb2.GenerateResponse(text="", error="prompt is required")
+        max_new_tokens = request.max_new_tokens if request.max_new_tokens > 0 else 50
+        try:
+            text = _ai_service.generate(prompt, max_new_tokens=max_new_tokens)
+            return health_pb2.GenerateResponse(text=text)
+        except Exception as e:
+            logger.exception("Generate failed: %s", e)
+            return health_pb2.GenerateResponse(text="", error=str(e))
 
 
 def serve():
     """
     Start the gRPC server.
-    
+
     The server listens on the port specified by the PORT environment variable,
     or defaults to 50051 if not set.
     """
     # Get port from environment variable or use default
-    port = os.getenv('PORT', '50051')
-    server_address = f'0.0.0.0:{port}'
-    
+    port = os.getenv("PORT", "50051")
+    server_address = f"0.0.0.0:{port}"
+
     logger.info(f"Starting gRPC server on {server_address}")
-    
+
     # Create gRPC server with thread pool executor
     # max_workers: number of threads to handle concurrent requests
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
-    
+
     # Add HealthService to the server
-    health_pb2_grpc.add_HealthServiceServicer_to_server(
-        HealthServiceServicer(), server
-    )
-    
+    health_pb2_grpc.add_HealthServiceServicer_to_server(HealthServiceServicer(), server)
+
     # Add insecure port (for development - use TLS in production)
     server.add_insecure_port(server_address)
-    
+
     # Start the server
     server.start()
     logger.info(f"gRPC server started on {server_address}")
-    
+
     try:
         # Keep the server running
         server.wait_for_termination()
@@ -157,5 +198,5 @@ def serve():
         logger.info("Server stopped")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     serve()

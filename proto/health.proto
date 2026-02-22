@@ -5,11 +5,15 @@ syntax = "proto3";
 
 package health;
 
-// Health service provides health check functionality
+// Health service provides health check and AI generation functionality
 service HealthService {
   // HealthCheck checks if the service is running and ready
   // Returns success if the service is operational
   rpc HealthCheck (HealthCheckRequest) returns (HealthCheckResponse);
+
+  // Generate completes the given prompt using the local AI model (DistilGPT-2)
+  // Returns the generated text (prompt + continuation)
+  rpc Generate (GenerateRequest) returns (GenerateResponse);
 }
 
 // Request message for health check
@@ -25,4 +29,20 @@ message HealthCheckResponse {
   
   // Optional: additional status message
   string message = 2;
+}
+
+// Request message for AI text generation
+message GenerateRequest {
+  // Input text (prompt) from which the model will generate continuation
+  string prompt = 1;
+  // Maximum number of new tokens to generate (optional, server default used if 0)
+  int32 max_new_tokens = 2;
+}
+
+// Response message for AI text generation
+message GenerateResponse {
+  // Generated text (prompt + model continuation), or empty on error
+  string text = 1;
+  // Optional error message if generation failed
+  string error = 2;
 }

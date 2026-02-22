@@ -1,7 +1,15 @@
 # Python dependencies for AI Demo gRPC server
-grpcio==1.60.0
-grpcio-tools==1.60.0
+grpcio==1.60.1
+grpcio-tools==1.60.1
 protobuf==4.25.1
+
+# AI model (DistilGPT-2) – local Hugging Face model, no API key required
+transformers>=4.36.0
+torch>=2.0.0
+accelerate>=0.25.0
+
+# Linting (dev)
+ruff>=0.8.0
 
 # Testing dependencies
 pytest==8.3.4

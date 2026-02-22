@@ -7,17 +7,17 @@ Tests the HealthService gRPC methods using pytest and grpcio-testing.
 
 import os
 import sys
+from unittest.mock import MagicMock
+
 import pytest
-from unittest.mock import MagicMock, patch
 
 # Add proto directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'proto'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "proto"))
 
 try:
-    import grpc
-    from grpc_testing import server_from_dictionary, \
-        strict_real_time, service_dictionary
-    
+    import grpc  # noqa: F401 - availability check, used in TestServerIntegration
+    import grpc_testing  # noqa: F401 - availability check
+
     import proto.health_pb2 as health_pb2
     import proto.health_pb2_grpc as health_pb2_grpc
     from server import HealthServiceServicer
@@ -27,12 +27,12 @@ except ImportError as e:
 
 class TestHealthServiceServicer:
     """Test suite for HealthServiceServicer"""
-    
+
     @pytest.fixture
     def servicer(self):
         """Create HealthServiceServicer instance"""
         return HealthServiceServicer()
-    
+
     @pytest.fixture
     def mock_context(self):
         """Create mock gRPC context"""
@@ -40,15 +40,15 @@ class TestHealthServiceServicer:
         context.code = lambda: None
         context.details = lambda: None
         return context
-    
+
     def test_health_check_returns_success(self, servicer, mock_context):
         """Test that HealthCheck returns success response"""
         # Arrange
         request = health_pb2.HealthCheckRequest()
-        
+
         # Act
         response = servicer.HealthCheck(request, mock_context)
-        
+
         # Assert
         assert response is not None
         assert response.status == "success"
@@ -60,10 +60,10 @@ class TestHealthServiceServicer:
         """Test that HealthCheck accepts HealthCheckRequest"""
         # Arrange
         request = health_pb2.HealthCheckRequest()
-        
+
         # Act
         response = servicer.HealthCheck(request, mock_context)
-        
+
         # Assert
         assert isinstance(response, health_pb2.HealthCheckResponse)
 
@@ -71,12 +71,12 @@ class TestHealthServiceServicer:
         """Test that HealthCheck can be called multiple times"""
         # Arrange
         request = health_pb2.HealthCheckRequest()
-        
+
         # Act - call multiple times
         response1 = servicer.HealthCheck(request, mock_context)
         response2 = servicer.HealthCheck(request, mock_context)
         response3 = servicer.HealthCheck(request, mock_context)
-        
+
         # Assert
         assert response1.status == "success"
         assert response2.status == "success"
@@ -86,23 +86,22 @@ class TestHealthServiceServicer:
 
 class TestServerIntegration:
     """Integration tests for gRPC server"""
-    
+
     def test_health_service_registration(self):
         """Test that HealthService can be registered on server"""
         # Arrange
         from concurrent import futures
+
         import grpc
-        
+
         server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
-        
+
         # Act
-        health_pb2_grpc.add_HealthServiceServicer_to_server(
-            HealthServiceServicer(), server
-        )
-        
+        health_pb2_grpc.add_HealthServiceServicer_to_server(HealthServiceServicer(), server)
+
         # Assert - no exception should be raised
         assert server is not None
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

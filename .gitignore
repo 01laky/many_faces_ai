@@ -8,6 +8,7 @@ env/
 venv/
 ENV/
 .venv
+.venv-lint/
 
 # Generated proto files (will be generated during build)
 proto/*_pb2.py

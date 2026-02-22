@@ -6,11 +6,6 @@ FROM python:3.11-slim
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
-
 # Copy requirements first for better Docker layer caching
 COPY requirements.txt .
 
@@ -34,8 +29,9 @@ RUN python3 -m grpc_tools.protoc \
 RUN sed -i 's/^import health_pb2 as health__pb2$/import proto.health_pb2 as health__pb2/' proto/health_pb2_grpc.py || true
 RUN sed -i 's/^from health_pb2/from proto.health_pb2/' proto/health_pb2_grpc.py || true
 
-# Copy application code
+# Copy application code (server + AI model service)
 COPY server.py .
+COPY services/ services/
 
 # Create proto/__init__.py if it doesn't exist (allows proto to be imported as package)
 RUN touch proto/__init__.py || true
