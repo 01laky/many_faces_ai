@@ -14,6 +14,7 @@ Usage:
 import logging
 import os
 import sys
+import threading
 from concurrent import futures
 
 import grpc
@@ -157,6 +158,14 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
         try:
             text = _ai_service.generate(prompt, max_new_tokens=max_new_tokens)
             return health_pb2.GenerateResponse(text=text)
+        except RuntimeError as e:
+            if "MODEL_LOADING" in str(e):
+                logger.info("Model is still loading, returning friendly message")
+                return health_pb2.GenerateResponse(
+                    text="⏳ AI model sa práve načítava do pamäte (prvé spustenie po rebuilde). Skúste to prosím o pár minút znova."
+                )
+            logger.exception("Generate failed: %s", e)
+            return health_pb2.GenerateResponse(text="", error=str(e))
         except Exception as e:
             logger.exception("Generate failed: %s", e)
             return health_pb2.GenerateResponse(text="", error=str(e))
@@ -177,7 +186,18 @@ def serve():
 
     # Create gRPC server with thread pool executor
     # max_workers: number of threads to handle concurrent requests
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    # Keep-alive options: allow clients to send frequent pings (needed for
+    # .NET gRPC client that sends keep-alive pings every 60s while waiting
+    # for long-running AI generation requests).
+    server_options = [
+        ("grpc.keepalive_permit_without_calls", 1),
+        ("grpc.http2.min_ping_interval_without_data_ms", 20000),
+        ("grpc.http2.min_recv_ping_interval_without_data_ms", 20000),
+    ]
+    server = grpc.server(
+        futures.ThreadPoolExecutor(max_workers=10),
+        options=server_options,
+    )
 
     # Add HealthService to the server
     health_pb2_grpc.add_HealthServiceServicer_to_server(HealthServiceServicer(), server)
@@ -188,6 +208,19 @@ def serve():
     # Start the server
     server.start()
     logger.info(f"gRPC server started on {server_address}")
+
+    # Pre-load model in background so first user request doesn't wait 3-5 min
+    def _warmup_model():
+        if _ai_service is not None:
+            try:
+                logger.info("Pre-loading AI model (background warmup)...")
+                _ai_service.generate("Hi", max_new_tokens=3)
+                logger.info("AI model pre-loaded, ready for requests")
+            except Exception as e:
+                logger.warning("Model warmup failed (will load on first request): %s", e)
+
+    warmup_thread = threading.Thread(target=_warmup_model, daemon=True)
+    warmup_thread.start()
 
     try:
         # Keep the server running
