@@ -9,6 +9,7 @@ venv/
 ENV/
 .venv
 .venv-*/
+.venv-ci-verify/
 .venv-lint/
 
 # Generated proto files (will be generated during build)
