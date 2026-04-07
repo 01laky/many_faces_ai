@@ -51,46 +51,39 @@ logger.debug(f"Python path: {sys.path[:3]}")
 logger.debug(f"Current directory: {os.getcwd()}")
 logger.debug(f"App directory: {app_dir}")
 
+_proto_dir = os.path.join(app_dir, "proto")
+_health_pb2_path = os.path.join(_proto_dir, "health_pb2.py")
+_health_pb2_grpc_path = os.path.join(_proto_dir, "health_pb2_grpc.py")
+
 try:
-    # Use importlib.util to load modules directly from file paths
-    # This is more reliable than regular imports when path handling is complex
-    import importlib.util
+    if not (os.path.isfile(_health_pb2_path) and os.path.isfile(_health_pb2_grpc_path)):
+        raise FileNotFoundError("health_pb2.py / health_pb2_grpc.py not found under proto/")
 
-    # Load health_pb2 from file path
-    health_pb2_path = os.path.join(app_dir, "proto", "health_pb2.py")
-    health_pb2_spec = importlib.util.spec_from_file_location("proto.health_pb2", health_pb2_path)
-    health_pb2 = importlib.util.module_from_spec(health_pb2_spec)
-    health_pb2_spec.loader.exec_module(health_pb2)
+    # Generated *_grpc.py does `import health_pb2` (sibling module); proto/ must be on sys.path.
+    if _proto_dir not in sys.path:
+        sys.path.insert(0, _proto_dir)
 
-    # Load health_pb2_grpc from file path
-    health_pb2_grpc_path = os.path.join(app_dir, "proto", "health_pb2_grpc.py")
-    health_pb2_grpc_spec = importlib.util.spec_from_file_location(
-        "proto.health_pb2_grpc", health_pb2_grpc_path
-    )
-    health_pb2_grpc = importlib.util.module_from_spec(health_pb2_grpc_spec)
-    health_pb2_grpc_spec.loader.exec_module(health_pb2_grpc)
+    import health_pb2  # noqa: E402
+    import health_pb2_grpc as health_pb2_grpc  # noqa: E402
 
-    logger.info("Successfully imported gRPC code from proto package")
+    logger.info("Successfully imported gRPC code from generated proto stubs")
 except (ImportError, ModuleNotFoundError, FileNotFoundError) as e:
     logger.error(f"Failed to import generated gRPC code: {e}")
     logger.error(f"Exception type: {type(e).__name__}")
     logger.error(f"Python path: {sys.path}")
     logger.error(f"Current directory: {os.getcwd()}")
     logger.error(f"App directory: {app_dir}")
-    # Try to list proto directory contents for debugging
-    proto_dir = os.path.join(app_dir, "proto")
-    if os.path.exists(proto_dir):
-        logger.error(f"Proto directory exists: {proto_dir}")
+    if os.path.exists(_proto_dir):
+        logger.error(f"Proto directory exists: {_proto_dir}")
         try:
-            files = os.listdir(proto_dir)
-            logger.error(f"Files in proto directory: {files}")
-        except Exception as list_error:
+            logger.error(f"Files in proto directory: {os.listdir(_proto_dir)}")
+        except OSError as list_error:
             logger.error(f"Could not list proto directory: {list_error}")
     logger.error("Please run ./generate_proto.sh to generate the required files")
     logger.error(
         "Or ensure Docker build completed successfully (proto files are generated during build)"
     )
-    sys.exit(1)
+    raise ImportError("gRPC stubs missing or invalid; run ./generate_proto.sh from ai_demo/") from e
 
 # Import AI model service – communicates with local DistilGPT-2 model
 try:

@@ -8,6 +8,7 @@ env/
 venv/
 ENV/
 .venv
+.venv-*/
 .venv-lint/
 
 # Generated proto files (will be generated during build)

@@ -11,16 +11,20 @@ from unittest.mock import MagicMock
 
 import pytest
 
-# Add proto directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "proto"))
+# Repo root (ai_demo) on path: `proto` package + `server` module
+_APP_ROOT = os.path.dirname(os.path.abspath(__file__))
+if _APP_ROOT not in sys.path:
+    sys.path.insert(0, _APP_ROOT)
 
 try:
     import grpc  # noqa: F401 - availability check, used in TestServerIntegration
     import grpc_testing  # noqa: F401 - availability check
 
-    import proto.health_pb2 as health_pb2
-    import proto.health_pb2_grpc as health_pb2_grpc
-    from server import HealthServiceServicer
+    import server
+
+    health_pb2 = server.health_pb2
+    health_pb2_grpc = server.health_pb2_grpc
+    HealthServiceServicer = server.HealthServiceServicer
 except ImportError as e:
     pytest.skip(f"Skipping gRPC tests: {e}", allow_module_level=True)
 
