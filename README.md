@@ -12,7 +12,7 @@ The AI Demo (ai_demo) is a Python-based gRPC server that provides health check f
   - High-performance RPC communication
   - Protocol Buffers for data serialization
   - Health check endpoint
-  - **AI text generation** – RPC `Generate` s lokálnym modelom DistilGPT-2 (bez API kľúča)
+  - **AI text generation** — `Generate` RPC with local DistilGPT-2 (no API key)
 
 - **Docker Support**
   - Containerized development environment
@@ -42,7 +42,7 @@ ai_demo/
 ├── server.py               # gRPC server implementation
 ├── services/               # AI model service
 │   ├── __init__.py
-│   └── ai_model_service.py # Služba pre DistilGPT-2 (generate)
+│   └── ai_model_service.py # DistilGPT-2 wrapper (generate)
 ├── generate_proto.sh       # Script to generate Python code from proto files
 ├── requirements.txt        # Python dependencies
 ├── Dockerfile.dev          # Development Dockerfile

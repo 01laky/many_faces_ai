@@ -1,95 +1,93 @@
-# AI integrácia – čo je pripravené a ako to funguje
+# AI integration — what is in place and how it works
 
-## 1. Voľný AI model pre Python
+## 1. Open-weight model for Python
 
 - **Model:** **DistilGPT-2** (Hugging Face: `distilgpt2`)
-- **Dôvod výberu:**
-  - Beží lokálne na CPU, bez API kľúča a bez externých služieb
-  - Malá veľkosť (~82M parametrov, cca 80 MB), vhodný na demo a vývoj
-  - Licencia Apache 2.0
-  - Knižnica `transformers` + `torch` – štandardný spôsob použitia v Pythone
+- **Why this choice:**
+  - Runs locally on CPU, no API key or external services
+  - Small footprint (~82M parameters, ~80 MB), good for demos and dev
+  - Apache 2.0 license
+  - Standard stack: `transformers` + `torch`
 
-## 2. Čo bolo pripravené
+## 2. What was added
 
-### 2.1 Služba pre komunikáciu s modelom
+### 2.1 Service that talks to the model
 
-- **Súbor:** `services/ai_model_service.py`
-- **Trieda:** `AIModelService`
-- **Funkcie:**
-  - **Lazy loading:** model sa načíta až pri prvom volaní `generate()`, aby server štartoval rýchlo
-  - **`generate(prompt, max_new_tokens=50, ...)`** – dopĺňa zadaný text (prompt) a vráti prompt + vygenerované pokračovanie
-  - Voliteľné parametre: `do_sample`, `temperature` (ovplyvňujú náhodnosť / kreativitu výstupu)
-  - Všetky dôležité časti sú v kóde okomentované (slovensky)
+- **File:** `services/ai_model_service.py`
+- **Class:** `AIModelService`
+- **Behavior:**
+  - **Lazy loading:** weights load on first `generate()` so the server starts quickly
+  - **`generate(prompt, max_new_tokens=50, ...)`** — continues the given prompt and returns prompt + generated continuation
+  - Optional: `do_sample`, `temperature` (randomness / creativity)
+  - Important parts of the service code are commented inline
 
-### 2.2 gRPC integrácia
+### 2.2 gRPC integration
 
-- **Proto:** V `proto/health.proto` boli pridané:
+- **Proto:** `proto/health.proto` defines:
   - **RPC:** `Generate(GenerateRequest) returns (GenerateResponse)`
-  - **GenerateRequest:** `prompt` (string), `max_new_tokens` (int32, voliteľné)
-  - **GenerateResponse:** `text` (vygenerovaný text), `error` (prípadná chyba)
-- **Server:** V `server.py`:
-  - Pri štarte sa vytvorí inštancia `AIModelService` (model sa ešte nenačítava)
-  - `HealthServiceServicer` má novú metódu `Generate`, ktorá:
-    - overí, či je `AIModelService` k dispozícii,
-    - zavolá `_ai_service.generate(prompt, max_new_tokens=...)`,
-    - vráti `GenerateResponse(text=..., error=...)` alebo chybovú hlášku v `error`
-  - Ak `transformers`/`torch` nie sú nainštalované, server beží ďalej, ale `Generate` vráti chybu v `error`
+  - **GenerateRequest:** `prompt` (string), `max_new_tokens` (int32, optional)
+  - **GenerateResponse:** `text` (generated text), `error` (optional failure message)
+- **Server:** `server.py`:
+  - On startup, creates `AIModelService` (weights not loaded yet)
+  - `HealthServiceServicer` implements `Generate`:
+    - checks `AIModelService` availability,
+    - calls `_ai_service.generate(prompt, max_new_tokens=...)`,
+    - returns `GenerateResponse(text=..., error=...)` or an error string
+  - If `transformers`/`torch` are missing, the server still runs but `Generate` returns an error in `error`
 
-### 2.3 Závislosti a Docker
+### 2.3 Dependencies and Docker
 
-- **requirements.txt:** pridané `transformers`, `torch`, `accelerate`
-- **Dockerfile.dev:** do image sa kopíruje priečinok `services/`
-- **Proto:** po úprave `health.proto` je potrebné znovu vygenerovať Python kód (v Dockeri sa robí počas buildu)
+- **requirements.txt:** `transformers`, `torch`, `accelerate`
+- **Dockerfile.dev:** copies `services/` into the image
+- **Proto:** after editing `health.proto`, regenerate Python stubs (Docker build does this)
 
-## 3. Ako to funguje (tok)
+## 3. Request flow
 
-1. **Štart servera**
-   - Načíta sa gRPC kód z `proto/` a zaregistruje sa `HealthService` (HealthCheck + Generate).
-   - Vytvorí sa `AIModelService()` – model sa zatiaľ nenačítava.
+1. **Server start**
+   - Load gRPC code from `proto/` and register `HealthService` (HealthCheck + Generate).
+   - Construct `AIModelService()` — still no model weights in memory.
 
-2. **Prvý Generate request**
-   - Klient zavolá `Generate(prompt="The weather today is", max_new_tokens=30)`.
-   - Server v `Generate` zavolá `_ai_service.generate("The weather today is", max_new_tokens=30)`.
-   - V `AIModelService.generate()` sa pri prvom volaní zavolá `_get_pipeline()`:
-     - stiahne sa (alebo načíta z cache) model `distilgpt2`,
-     - vytvorí sa `transformers` pipeline `text-generation`.
-   - Pipeline vygeneruje pokračovanie textu; výsledok sa vráti ako `GenerateResponse.text`.
+2. **First Generate call**
+   - Client calls `Generate(prompt="The weather today is", max_new_tokens=30)`.
+   - Server calls `_ai_service.generate(...)`.
+   - Inside `AIModelService.generate()`, first call runs `_get_pipeline()`:
+     - download or load cached `distilgpt2`,
+     - build a `transformers` `text-generation` pipeline.
+   - Pipeline produces continuation; returned as `GenerateResponse.text`.
 
-3. **Ďalšie Generate requesty**
-   - Model je už v pamäti, žiadne ďalšie sťahovanie – len inferencia.
+3. **Later Generate calls**
+   - Model stays in memory — inference only.
 
-4. **Chybové stavy**
-   - Prázdny `prompt` → `GenerateResponse(error="prompt is required")`.
-   - Chýbajúce `transformers`/`torch` → `GenerateResponse(error="AIModelService not available...")`.
-   - Výnimka počas generovania → loguje sa a do klienta sa vráti `GenerateResponse(text="", error=str(e))`.
+4. **Errors**
+   - Empty `prompt` → `GenerateResponse(error="prompt is required")`.
+   - Missing `transformers`/`torch` → `GenerateResponse(error="AIModelService not available...")`.
+   - Exception during generation → logged; client gets `GenerateResponse(text="", error=str(e))`.
 
-## 4. Ako to spustiť a otestovať
+## 4. How to run and test
 
-- **Lokálne (s vygenerovaným proto a nainštalovanými závislosťami):**
+- **Local (with generated protos and deps installed):**
   ```bash
   pip install -r requirements.txt
-  ./generate_proto.sh   # alebo vygenerovať proto podľa README
+  ./generate_proto.sh   # or generate per README
   python server.py
   ```
-- **V Dockeri (odporúčané):**
+- **Docker (recommended):**
   ```bash
   ./rebuild-dev.sh
   ./start-dev.sh
   ```
-  Proto sa vygeneruje počas buildu, `services/` sa skopíruje do image.
+  Proto generation runs during build; `services/` is copied into the image.
 
-- **Test Generate RPC (napr. grpcurl):**
+- **Test Generate (e.g. grpcurl):**
   ```bash
   grpcurl -plaintext -d '{"prompt": "The weather today is", "max_new_tokens": 20}' localhost:50051 health.HealthService/Generate
   ```
 
-## 5. Súhrn
+## 5. Summary
 
-| Čo | Kde | Účel |
-|----|-----|------|
-| Voľný model | DistilGPT-2 (Hugging Face) | Lokálna textová generácia bez API kľúča |
-| Služba | `services/ai_model_service.py` | Načítanie modelu, metóda `generate()` |
-| gRPC | `proto/health.proto`, `server.py` | RPC `Generate` a jeho obsluha |
-| Závislosti | `requirements.txt`, Dockerfile | `transformers`, `torch`, `accelerate` |
-
-Všetko dôležité v kóde je okomentované (slovensky v službe, anglicky/slovensky v serveri a proto).
+| Piece | Location | Role |
+|-------|----------|------|
+| Open model | DistilGPT-2 (Hugging Face) | Local text generation without an API key |
+| Service | `services/ai_model_service.py` | Load weights, `generate()` |
+| gRPC | `proto/health.proto`, `server.py` | `Generate` RPC and handler |
+| Deps | `requirements.txt`, Dockerfile | `transformers`, `torch`, `accelerate` |
