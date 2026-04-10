@@ -9,11 +9,13 @@
 **What it is:** For each new message, send the model not only the latest user turn but also the **last N (user → assistant) pairs** as text. The model can then continue coherently.
 
 **Pros:**
+
 - No training, no weight updates
 - Fast to implement (prompt formatting on the backend)
 - Within one session it “remembers” prior turns
 
 **Cons:**
+
 - Memory only for that conversation; new chat = empty context
 - Bounded length — only so many tokens fit in the prompt
 
@@ -24,16 +26,19 @@
 ## 2. RAG (Retrieval-Augmented Generation)
 
 **What it is:** A **knowledge base** (docs, FAQ, manuals). For each question:
+
 1. Embed the question and query a **vector database**.
 2. Retrieve **relevant chunks** from documents.
 3. **Inject those chunks** into the prompt (e.g. “Given the following: … Answer: …”).
 4. The model answers from that context — **weights unchanged**.
 
 **Pros:**
+
 - Ground answers in your documents without training
 - Update the corpus without retraining
 
 **Cons:**
+
 - You need embeddings, vector DB, chunking strategy
 - More moving parts (indexing, retrieval, prompt assembly)
 
@@ -44,10 +49,12 @@
 **What it is:** Start from a pre-trained checkpoint and **continue training** on your dataset (Q/A pairs, dialogues, domain text). Weights **change permanently**; you ship a new checkpoint for inference.
 
 **Pros:**
+
 - Model can internalize domain and style
 - Potentially more accurate and consistent with training data
 
 **Cons:**
+
 - Needs a quality dataset
 - Compute (GPU), training time
 - Data drift means retraining or lighter methods (LoRA, adapters)
@@ -56,10 +63,10 @@
 
 ## Summary
 
-| Approach | Weights change? | Memory / knowledge | Effort |
-|----------|-----------------|--------------------|--------|
-| Conversation context | No | Only in-session (prompt) | Low |
-| RAG | No | Document corpus | Medium |
-| Fine-tuning | Yes | Baked into weights | Higher |
+| Approach             | Weights change? | Memory / knowledge       | Effort |
+| -------------------- | --------------- | ------------------------ | ------ |
+| Conversation context | No              | Only in-session (prompt) | Low    |
+| RAG                  | No              | Document corpus          | Medium |
+| Fine-tuning          | Yes             | Baked into weights       | Higher |
 
 This demo implements **conversation context** — the FE sends the last N messages, the backend builds the prompt, Python returns the reply; within one session the model follows the thread.

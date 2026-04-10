@@ -72,10 +72,12 @@
   python server.py
   ```
 - **Docker (recommended):**
+
   ```bash
   ./rebuild-dev.sh
   ./start-dev.sh
   ```
+
   Proto generation runs during build; `services/` is copied into the image.
 
 - **Test Generate (e.g. grpcurl):**
@@ -85,9 +87,9 @@
 
 ## 5. Summary
 
-| Piece | Location | Role |
-|-------|----------|------|
-| Open model | DistilGPT-2 (Hugging Face) | Local text generation without an API key |
-| Service | `services/ai_model_service.py` | Load weights, `generate()` |
-| gRPC | `proto/health.proto`, `server.py` | `Generate` RPC and handler |
-| Deps | `requirements.txt`, Dockerfile | `transformers`, `torch`, `accelerate` |
+| Piece      | Location                          | Role                                     |
+| ---------- | --------------------------------- | ---------------------------------------- |
+| Open model | DistilGPT-2 (Hugging Face)        | Local text generation without an API key |
+| Service    | `services/ai_model_service.py`    | Load weights, `generate()`               |
+| gRPC       | `proto/health.proto`, `server.py` | `Generate` RPC and handler               |
+| Deps       | `requirements.txt`, Dockerfile    | `transformers`, `torch`, `accelerate`    |

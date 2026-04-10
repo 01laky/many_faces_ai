@@ -64,6 +64,7 @@ The easiest way to run the AI Demo server in development:
 ```
 
 This script will:
+
 1. Check if proto files exist (if not, they will be generated during Docker build)
 2. Build Docker image (if needed)
 3. Start the gRPC server container
@@ -83,6 +84,7 @@ docker-compose -f docker-compose.dev.yml up -d ai-demo-dev
 ```
 
 Or manually:
+
 ```bash
 docker-compose -f docker-compose.dev.yml stop ai-demo-dev
 docker-compose -f docker-compose.dev.yml rm -f ai-demo-dev
@@ -109,11 +111,13 @@ To perform a clean rebuild of Docker images:
 ### Local Development (Without Docker)
 
 1. **Install dependencies**:
+
    ```bash
    pip install -r requirements.txt
    ```
 
 2. **Generate gRPC code from proto files**:
+
    ```bash
    ./generate_proto.sh
    ```
@@ -123,6 +127,7 @@ To perform a clean rebuild of Docker images:
    - `proto/health_pb2_grpc.py` - gRPC service stubs
 
 3. **Run the server**:
+
    ```bash
    python server.py
    ```
@@ -174,6 +179,7 @@ message HealthCheckResponse {
 - `PORT` - gRPC server port (default: `50051`)
 
 Configured in `docker-compose.dev.yml`:
+
 ```yaml
 environment:
   - PORT=50051
@@ -190,22 +196,26 @@ The service runs on the `mfai_demo_dev-network` Docker network, allowing other s
 Proto files are automatically generated during Docker image build. To regenerate manually:
 
 **In Docker** (during build):
+
 ```bash
 python -m grpc_tools.protoc -I./proto --python_out=./proto --grpc_python_out=./proto ./proto/health.proto
 ```
 
 **Locally**:
+
 ```bash
 ./generate_proto.sh
 ```
 
 This generates:
+
 - `proto/health_pb2.py` - Protocol buffer message classes
 - `proto/health_pb2_grpc.py` - gRPC service stubs
 
 ### Adding New RPC Methods
 
 1. **Update `proto/health.proto`**:
+
    ```protobuf
    service HealthService {
      rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
@@ -216,6 +226,7 @@ This generates:
 2. **Regenerate proto files**: `./generate_proto.sh`
 
 3. **Implement method in `server.py`**:
+
    ```python
    def NewMethod(self, request, context):
        return health_pb2.NewMethodResponse(status="ok")
@@ -253,7 +264,7 @@ docker logs be-demo-dev | grep -i "ai service"
 
 3. **Make code changes**: Edit `server.py` or `proto/health.proto`
 
-4. **Test changes**: 
+4. **Test changes**:
    - Check service is responding: `docker logs ai-demo-dev`
    - Verify backend can connect (check backend logs)
 
@@ -268,6 +279,7 @@ This AI Demo is part of the `_mfai_demo` monorepo and integrates with:
 - **Backend API**: `be_demo` (ASP.NET Core) - connects on startup for health check
 
 Use root-level scripts to manage all services:
+
 - `start-all-dev.sh` - Start all services with live status screen
 - `stop-all-dev.sh` - Stop all services
 - `clear-all-dev.sh` - Clear all containers and volumes
