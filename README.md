@@ -258,9 +258,9 @@ docker logs be-demo-dev | grep -i "ai service"
 
 ## Development Workflow
 
-1. **Start database**: Ensure PostgreSQL is running (via `db_demo` or root `start-all-dev.sh`)
+1. **Start database**: Ensure PostgreSQL is running (via `db_demo` or monorepo `./scripts/start-all-dev.sh`)
 
-2. **Start AI Demo**: Run `./start-dev.sh` or use root `start-all-dev.sh` to start all services
+2. **Start AI Demo**: Run `./start-dev.sh` or use monorepo `./scripts/start-all-dev.sh` to start all services
 
 3. **Make code changes**: Edit `server.py` or `proto/health.proto`
 
@@ -270,7 +270,7 @@ docker logs be-demo-dev | grep -i "ai service"
 
 5. **Rebuild if needed**: `./rebuild-dev.sh` (if proto files changed)
 
-6. **Stop services**: Run `./stop-dev.sh` or root `stop-all-dev.sh`
+6. **Stop services**: Run `./stop-dev.sh` or monorepo `./scripts/stop-all-dev.sh`
 
 ## Integration with Root Project
 
@@ -280,11 +280,11 @@ This AI Demo is part of the `_mfai_demo` monorepo and integrates with:
 
 Use root-level scripts to manage all services:
 
-- `start-all-dev.sh` - Start all services with live status screen
-- `stop-all-dev.sh` - Stop all services
-- `clear-all-dev.sh` - Clear all containers and volumes
-- `status-all.sh` - Show status of all services
-- `rebuild-all-dev.sh` - Rebuild all Docker images
+- `./scripts/start-all-dev.sh` - Start all services with live status screen
+- `./scripts/stop-all-dev.sh` - Stop all services
+- `./scripts/clear-all-dev.sh` - Clear all containers and volumes
+- `./scripts/status-all.sh` - Show status of all services
+- `./scripts/rebuild-all-dev.sh` - Rebuild all Docker images
 
 ## Troubleshooting
 
