@@ -11,6 +11,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+pytestmark = pytest.mark.grpc
+
 # Repo root (ai_demo) on path: `proto` package + `server` module
 _APP_ROOT = os.path.dirname(os.path.abspath(__file__))
 if _APP_ROOT not in sys.path:

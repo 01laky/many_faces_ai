@@ -134,6 +134,18 @@ To perform a clean rebuild of Docker images:
 
    The server will listen on port 50051 by default (configurable via `PORT` environment variable).
 
+### Local unit tests (pytest)
+
+From `ai_demo/`:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install grpcio grpcio-tools protobuf pytest grpcio-testing
+.venv/bin/pytest test_server.py -v
+```
+
+Pinned versions in `requirements.txt` target **Python 3.11**. On **Python 3.13+**, installing those exact pins may try to build grpcio from source; use the unconstrained `grpcio` / `grpcio-tools` / `grpcio-testing` lines above (or matching wheels) so `pytest` can run. Generated stubs under `proto/` (`health_pb2.py`, `health_pb2_grpc.py`) must exist—run `./generate_proto.sh` or build via Docker. gRPC tests use the `grpc` marker (see `pytest.ini`).
+
 ## gRPC Service
 
 ### Health Check
