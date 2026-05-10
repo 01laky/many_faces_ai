@@ -6,6 +6,34 @@ Python gRPC server providing health check functionality for the AI Demo service.
 
 The AI Demo (ai_demo) is a Python-based gRPC server that provides health check functionality for AI services. The backend API (be_demo) connects to this service on startup to verify that AI services are available and operational.
 
+In the broader Many Faces AI architecture, this submodule is intended to become the AI workspace for application-aware intelligence. Today it provides the gRPC service foundation, health checks, and local text generation experiments; the longer-term direction is to connect AI features to the product context, operational reports, feature management, and safety-sensitive chat workflows.
+
+The goal is for the AI service to understand the application's structure instead of acting as a generic text generator. Future capabilities can use face configuration, page layouts, grid components, roles, content modules, and backend metadata as context for more useful responses. That makes the service a natural place for application-context summaries, admin-facing insights, feature recommendations, and guided diagnostics across the MFAI platform.
+
+This README describes both the current service and the intended direction. The application-context, reporting, feature-management, and chat-security capabilities described below are roadmap items unless explicitly implemented in code.
+
+## Planned Role In MFAI
+
+- **Application context intelligence:** build structured summaries of faces, pages, modules, routes, roles, and configuration so AI features can reason about the real app state.
+- **Operational reports:** generate human-readable reports for admins, such as face health, missing configuration, inactive modules, content gaps, usage patterns, or security-relevant anomalies.
+- **Feature management support:** help evaluate which features are enabled, incomplete, duplicated, risky, or ready to expose for a specific face or user role.
+- **Chat security assistance:** support moderation, abuse detection, unsafe-content review, suspicious-message reporting, and policy-aware chat diagnostics.
+- **Admin decision support:** provide explanations and recommendations that help operators understand what is configured, what is missing, and what should be reviewed next.
+- **Developer diagnostics:** eventually assist with debugging cross-service behaviour by summarizing backend responses, frontend grid schemas, AI service state, and integration errors.
+- **Safety-first AI boundaries:** keep AI outputs advisory by default, with backend-controlled enforcement for permissions, moderation decisions, and sensitive operations.
+
+## Suggested Future Capabilities
+
+The following areas would make the AI submodule more useful as the platform grows:
+
+- **Context snapshots:** a backend-provided payload describing faces, routes, page schemas, available modules, roles, capabilities, and recent operational signals.
+- **Report generation RPCs:** typed gRPC methods for generating admin reports instead of overloading free-form text generation.
+- **Feature review workflows:** AI-assisted checks for whether a face has complete pages, useful grid composition, required modules, and safe defaults.
+- **Chat risk scoring:** structured review of chat messages or conversations for spam, harassment, suspicious links, prompt-injection attempts, or policy violations.
+- **Explainable recommendations:** responses that include the reason, confidence, and source context behind each recommendation.
+- **Audit-friendly logging:** request metadata and model decisions logged in a way that supports review without leaking sensitive user content unnecessarily.
+- **Human approval flow:** AI can suggest moderation or configuration changes, but admin/backend workflows should approve any action that affects users or access rules.
+
 ## Features
 
 - **gRPC Server**
