@@ -12,7 +12,7 @@ The goal is for the AI service to understand the application's structure instead
 
 This README describes both the current service and the intended direction. The application-context, reporting, feature-management, and chat-security capabilities described below are roadmap items unless explicitly implemented in code.
 
-## Planned Role In MFAI
+## Role In MFAI
 
 - **Application context intelligence:** build structured summaries of faces, pages, modules, routes, roles, and configuration so AI features can reason about the real app state.
 - **Operational reports:** generate human-readable reports for admins, such as face health, missing configuration, inactive modules, content gaps, usage patterns, or security-relevant anomalies.
