@@ -30,9 +30,31 @@ The following areas would make the AI submodule more useful as the platform grow
 - **Report generation RPCs:** typed gRPC methods for generating admin reports instead of overloading free-form text generation.
 - **Feature review workflows:** AI-assisted checks for whether a face has complete pages, useful grid composition, required modules, and safe defaults.
 - **Chat risk scoring:** structured review of chat messages or conversations for spam, harassment, suspicious links, prompt-injection attempts, or policy violations.
+- **Content approval recommendations:** review user-created albums, blogs, and reels and return structured approval/rejection recommendations for backend/admin moderation workflows.
 - **Explainable recommendations:** responses that include the reason, confidence, and source context behind each recommendation.
 - **Audit-friendly logging:** request metadata and model decisions logged in a way that supports review without leaking sensitive user content unnecessarily.
 - **Human approval flow:** AI can suggest moderation or configuration changes, but admin/backend workflows should approve any action that affects users or access rules.
+
+## AI-Assisted Content Approval Role
+
+The planned content approval workflow uses this service as an AI reviewer for regular FE user-created albums, blogs, and reels. The AI service should not directly publish or remove content. It should return a structured recommendation to the backend, and the backend/admin workflow decides the final status. Full process guide: [`docs/guides/ai-assisted-content-approval.md`](../docs/guides/ai-assisted-content-approval.md).
+
+Target responsibilities:
+
+- Receive bounded review requests from the backend queue.
+- Evaluate submitted content and metadata using application context where available.
+- Return a structured decision: `approve`, `reject`, or `needs_human_review`.
+- Include confidence, risk level, flags, internal reason, safe user-facing message, model version, and trace id.
+- Avoid autonomous side effects; approval status changes belong to backend policy and admin/superadmin workflows.
+- Support auditability by producing stable trace metadata and explainable recommendation fields.
+
+Safety rule:
+
+- AI recommends.
+- Backend validates the recommendation.
+- Admin/superadmin or explicit backend policy finalizes the moderation decision.
+
+This keeps the AI service useful without making it an uncontrolled publisher.
 
 ## Features
 
