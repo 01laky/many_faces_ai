@@ -90,7 +90,9 @@ class TestHealthServiceServicer:
         assert response3.status == "success"
         assert response1.message == response2.message == response3.message
 
-    def test_review_content_returns_structured_approval_recommendation(self, servicer, mock_context):
+    def test_review_content_returns_structured_approval_recommendation(
+        self, servicer, mock_context
+    ):
         """Test baseline content moderation response shape for safe content"""
         request = health_pb2.ContentReviewRequest(
             content_type="Blog",
@@ -107,7 +109,7 @@ class TestHealthServiceServicer:
         assert response.decision == "approve"
         assert response.risk_level == "low"
         assert 0 <= response.confidence <= 1
-        assert response.model_version == "moderation-heuristic-v1"
+        assert response.model_version == "qwen-advisory-classifier-v2"
         assert response.trace_id.startswith("ai-review-")
         assert response.error == ""
 
@@ -129,8 +131,97 @@ class TestHealthServiceServicer:
         assert response.decision == "reject"
         assert response.risk_level == "high"
         assert "adult" in response.flags
-        assert "spam" in response.flags
+        assert "scam" in response.flags
         assert "unsafe_link" in response.flags
+        assert "video_analysis_boundary" in response.flags
+
+    def test_review_content_flags_media_metadata_issues(self, servicer, mock_context):
+        """Test classifier fallback catches unsupported media without unsafe rendering"""
+        request = health_pb2.ContentReviewRequest(
+            content_type="Album",
+            content_id=44,
+            moderation_version=1,
+            face_id=1,
+            title="Gallery",
+            body="Normal photos from a community event.",
+            media_url="https://cdn.example.com/download.bin",
+            creator_id="user-1",
+        )
+
+        response = servicer.ReviewContent(request, mock_context)
+
+        assert response.decision == "needs_human_review"
+        assert response.risk_level == "medium"
+        assert "unsupported_media" in response.flags
+        assert "image_analysis_boundary" in response.flags
+
+    def test_review_content_image_boundary_does_not_block_clean_album(self, servicer, mock_context):
+        request = health_pb2.ContentReviewRequest(
+            content_type="Album",
+            content_id=51,
+            moderation_version=1,
+            face_id=1,
+            title="Summer photos",
+            body="Photos from our verified community event at the park.",
+            media_url="https://cdn.example.com/photo.jpg",
+            creator_id="user-1",
+        )
+
+        response = servicer.ReviewContent(request, mock_context)
+
+        assert "image_analysis_boundary" in response.flags
+        assert response.decision == "approve"
+
+    def test_review_content_adds_video_boundary_for_reel(self, servicer, mock_context):
+        request = health_pb2.ContentReviewRequest(
+            content_type="Reel",
+            content_id=53,
+            moderation_version=1,
+            face_id=1,
+            title="Community reel",
+            body="Short clip from the weekend meetup.",
+            media_url="https://cdn.example.com/clip.mp4",
+            creator_id="user-1",
+        )
+
+        response = servicer.ReviewContent(request, mock_context)
+
+        assert "video_analysis_boundary" in response.flags
+        assert response.decision == "approve"
+
+    def test_review_content_handles_empty_title_and_body(self, servicer, mock_context):
+        request = health_pb2.ContentReviewRequest(
+            content_type="Blog",
+            content_id=52,
+            moderation_version=1,
+            face_id=1,
+            title="",
+            body="",
+            creator_id="user-1",
+        )
+
+        response = servicer.ReviewContent(request, mock_context)
+
+        assert response.trace_id.startswith("ai-review-")
+        assert response.decision in ("approve", "needs_human_review", "reject")
+        assert response.error == ""
+
+    def test_review_content_flags_low_quality_input(self, servicer, mock_context):
+        """Test classifier fallback sends sparse content to human review"""
+        request = health_pb2.ContentReviewRequest(
+            content_type="Blog",
+            content_id=45,
+            moderation_version=1,
+            face_id=1,
+            title="Hi",
+            body="",
+            creator_id="user-1",
+        )
+
+        response = servicer.ReviewContent(request, mock_context)
+
+        assert response.decision == "needs_human_review"
+        assert "low_quality" in response.flags
 
     def test_ai_model_service_defaults_to_qwen3_with_env_override(self, monkeypatch):
         """Test configured model defaults without loading model weights"""

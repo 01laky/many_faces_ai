@@ -1,12 +1,12 @@
 # AI Demo - gRPC Server
 
-Python gRPC server providing health check functionality for the AI Demo service.
+Python gRPC server providing **health checks**, optional **local Qwen text generation**, and structured **`ReviewContent`** responses for the user-content moderation pipeline used by `be_demo`.
 
 ## Overview
 
-The AI Demo (ai_demo) is a Python-based gRPC server that provides health check functionality for AI services. The backend API (be_demo) connects to this service on startup to verify that AI services are available and operational.
+The AI Demo (ai_demo) is a Python-based gRPC server. The backend API (`be_demo`) connects on startup for **health verification**, optional **Qwen-backed `Generate`**, and the **`ReviewContent`** contract used by the user-content moderation worker.
 
-In the broader Many Faces AI architecture, this submodule is intended to become the AI workspace for application-aware intelligence. Today it provides the gRPC service foundation, health checks, local Qwen text generation, and structured content-review recommendations; the longer-term direction is to connect AI features to the product context, operational reports, feature management, and safety-sensitive chat workflows.
+In the broader Many Faces AI architecture, this submodule is the AI workspace for application-aware intelligence. **Implemented today:** gRPC `Health`, `Generate` (local Qwen), and `ReviewContent` — a deterministic classifier over text and media URL metadata that returns approve / reject / needs-human-review with confidence, risk, flags, reasons, and optional **`image_analysis_boundary`** / **`video_analysis_boundary`** policy flags (placeholders for heavier CV models; the demo classifier does not treat them as sole auto-reject triggers). The longer-term direction is richer context snapshots, admin reports, and chat-security RPCs.
 
 The goal is for the AI service to understand the application's structure instead of acting as a generic text generator. Future capabilities can use face configuration, page layouts, grid components, roles, content modules, and backend metadata as context for more useful responses. That makes the service a natural place for application-context summaries, admin-facing insights, feature recommendations, and guided diagnostics across the MFAI platform.
 
@@ -30,23 +30,23 @@ The following areas would make the AI submodule more useful as the platform grow
 - **Report generation RPCs:** typed gRPC methods for generating admin reports instead of overloading free-form text generation.
 - **Feature review workflows:** AI-assisted checks for whether a face has complete pages, useful grid composition, required modules, and safe defaults.
 - **Chat risk scoring:** structured review of chat messages or conversations for spam, harassment, suspicious links, prompt-injection attempts, or policy violations.
-- **Content approval recommendations:** review user-created albums, blogs, and reels and return structured approval/rejection recommendations for backend/admin moderation workflows.
+- **Content approval recommendations:** implemented via `ReviewContent` (see below); backend owns enqueue, validation, and final status.
 - **Explainable recommendations:** responses that include the reason, confidence, and source context behind each recommendation.
 - **Audit-friendly logging:** request metadata and model decisions logged in a way that supports review without leaking sensitive user content unnecessarily.
 - **Human approval flow:** AI can suggest moderation or configuration changes, but admin/backend workflows should approve any action that affects users or access rules.
 
 ## AI-Assisted Content Approval Role
 
-The content approval workflow uses this service as an AI reviewer for regular FE user-created albums, blogs, and reels. The AI service does not directly publish or remove content. It exposes a typed `ReviewContent` gRPC method that returns a structured recommendation to the backend, and the backend/admin workflow decides the final status. Full process guide: [`docs/guides/ai-assisted-content-approval.md`](../docs/guides/ai-assisted-content-approval.md).
+The content approval workflow uses this service as an **advisory** reviewer for regular FE user-created albums, blogs, and reels. The service **never** publishes or deletes rows in PostgreSQL: it only answers `ReviewContent`. `be_demo` enqueues Redis jobs, calls gRPC, validates ranges and policy, retries with backoff, and only `SUPER_ADMIN` (or future explicit auto-policy) may set final `ApprovalStatus`. Full process guide: [`docs/guides/ai-assisted-content-approval.md`](../docs/guides/ai-assisted-content-approval.md).
 
 Target responsibilities:
 
-- Receive bounded review requests from the backend queue.
-- Evaluate submitted content and metadata using application context where available.
+- Receive bounded review requests from the backend worker (content type, titles, descriptions, media URLs, moderation version).
+- Classify using deterministic rules plus URL heuristics; attach **boundary** flags when image/video analysis would require a heavier model later.
 - Return a structured decision: `approve`, `reject`, or `needs_human_review`.
 - Include confidence, risk level, flags, internal reason, safe user-facing message, model version, and trace id.
-- Avoid autonomous side effects; approval status changes belong to backend policy and admin/superadmin workflows.
-- Support auditability by producing stable trace metadata and explainable recommendation fields.
+- Avoid autonomous side effects; all durable state changes stay in the API.
+- Support auditability with stable trace metadata; automated tests live in `ai_demo/test_server.py`.
 
 Safety rule:
 

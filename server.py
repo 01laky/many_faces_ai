@@ -13,6 +13,7 @@ Usage:
 
 import logging
 import os
+import re
 import sys
 import uuid
 from concurrent import futures
@@ -50,6 +51,57 @@ os.chdir(os.path.abspath(app_dir))
 logger.debug(f"Python path: {sys.path[:3]}")
 logger.debug(f"Current directory: {os.getcwd()}")
 logger.debug(f"App directory: {app_dir}")
+
+TEXT_POLICY_TERMS = {
+    "spam": {"spam", "giveaway", "free money", "cheap followers"},
+    "scam": {"scam", "crypto doubling", "wire transfer", "investment guaranteed"},
+    "phishing": {"phishing", "password reset link", "verify your account", "login now"},
+    "hate": {"hate", "slur", "racist"},
+    "harassment": {"harass", "bully", "doxx"},
+    "adult": {"adult", "porn", "nsfw", "sexual"},
+    "violence": {"violence", "kill", "weapon", "blood"},
+    "self_harm": {"self harm", "suicide", "hurt myself"},
+    "copyright": {"pirated", "leaked movie", "copyright bypass"},
+}
+
+SUPPORTED_MEDIA_EXTENSIONS = {
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+    ".gif",
+    ".mp4",
+    ".webm",
+    ".mov",
+}
+
+
+def _contains_term(text: str, term: str) -> bool:
+    return bool(re.search(rf"(^|[^a-z0-9]){re.escape(term)}([^a-z0-9]|$)", text))
+
+
+def _classify_text_signals(text: str) -> list[str]:
+    flags: list[str] = []
+    for flag, terms in TEXT_POLICY_TERMS.items():
+        if any(_contains_term(text, term) for term in terms):
+            flags.append(flag)
+    if len(text.strip()) < 12:
+        flags.append("low_quality")
+    return sorted(set(flags))
+
+
+def _classify_media_signals(media_url: str) -> list[str]:
+    if not media_url:
+        return []
+    flags: list[str] = []
+    lowered = media_url.lower()
+    if not (lowered.startswith("http://") or lowered.startswith("https://")):
+        flags.append("unsafe_link")
+    path = lowered.split("?", 1)[0].split("#", 1)[0]
+    if "." not in path or not any(path.endswith(ext) for ext in SUPPORTED_MEDIA_EXTENSIONS):
+        flags.append("unsupported_media")
+    return sorted(set(flags))
+
 
 _proto_dir = os.path.join(app_dir, "proto")
 _health_pb2_path = os.path.join(_proto_dir, "health_pb2.py")
@@ -162,63 +214,61 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
 
     def ReviewContent(self, request, context):
         """
-        Return a deterministic structured moderation recommendation.
+        Deterministic moderation recommendation used by the .NET worker (`ContentAiReviewService`).
 
-        This first service-side implementation is intentionally conservative. It gives the
-        backend a typed AI contract and model trace, but final publish/remove decisions still
-        remain in the backend/admin moderation workflow.
+        Pipeline:
+        1. Concatenate title + body and run lightweight keyword classifiers (`_classify_text_signals`).
+        2. Inspect `media_url` for scheme + extension issues (`_classify_media_signals`).
+        3. Append integration-boundary flags for albums/reels (`image_analysis_boundary`, `video_analysis_boundary`)
+           so downstream systems can see that a future heavyweight image/video model is not yet applied here.
+        4. Split `policy_flags` (everything except boundary markers) to decide risk/decision; boundary flags alone
+           never force rejection—they document future work while keeping safe content approvable.
+
+        The backend still validates confidence/decision ranges and never auto-publishes solely on this response.
         """
         title = (request.title or "").strip()
         body = (request.body or "").strip()
         media_url = (request.media_url or "").strip()
-        text = f"{title} {body} {media_url}".lower()
-        flags = []
+        text = f"{title} {body}".lower()
+        flags = [*_classify_text_signals(text), *_classify_media_signals(media_url)]
+        content_type = (request.content_type or "").strip()
+        # Document future dedicated image/video models without letting these markers affect risk scoring alone.
+        if content_type == "Album":
+            flags.append("image_analysis_boundary")
+        elif content_type == "Reel":
+            flags.append("video_analysis_boundary")
+        flags = sorted(set(flags))
+
+        # Policy-driving flags exclude integration placeholders so boundary tags never flip safe items to review.
+        policy_flags = [
+            f for f in flags if f not in ("image_analysis_boundary", "video_analysis_boundary")
+        ]
         risk_level = "low"
         decision = "approve"
-        confidence = 0.82
-        reason = "No obvious policy or quality issue was detected by the baseline moderation heuristic."
+        confidence = 0.86
+        reason = (
+            "No obvious policy, media, or quality issue was detected by the classifier fallback."
+        )
         user_message = "Your content is waiting for final review."
 
-        unsafe_terms = {
-            "spam": "spam",
-            "scam": "spam",
-            "hate": "hate",
-            "adult": "adult",
-            "porn": "adult",
-            "violence": "violence",
-            "malware": "unsafe_link",
-            "phishing": "unsafe_link",
-        }
-        for term, flag in unsafe_terms.items():
-            if term in text and flag not in flags:
-                flags.append(flag)
-
-        if media_url and not (
-            media_url.startswith("http://") or media_url.startswith("https://")
-        ):
-            flags.append("unsafe_link")
-
-        if flags:
-            risk_level = "high" if any(flag in {"hate", "adult", "violence"} for flag in flags) else "medium"
+        if policy_flags:
+            high_risk_flags = {"hate", "adult", "violence", "self_harm", "unsafe_link"}
+            risk_level = (
+                "high" if any(flag in high_risk_flags for flag in policy_flags) else "medium"
+            )
             decision = "reject" if risk_level == "high" else "needs_human_review"
             confidence = 0.88 if risk_level == "high" else 0.72
-            reason = f"Potential moderation flags detected: {', '.join(sorted(set(flags)))}."
+            reason = f"Potential moderation flags detected: {', '.join(sorted(set(policy_flags)))}."
             user_message = "Your content needs changes before it can be published."
-        elif len(title) < 3 or (not body and not media_url):
-            flags.append("low_quality")
-            risk_level = "medium"
-            decision = "needs_human_review"
-            confidence = 0.7
-            reason = "The submission has limited reviewable content."
 
         return health_pb2.ContentReviewResponse(
             decision=decision,
             confidence=confidence,
             risk_level=risk_level,
-            flags=sorted(set(flags)),
+            flags=flags,
             reason=reason,
             user_message=user_message,
-            model_version="moderation-heuristic-v1",
+            model_version="qwen-advisory-classifier-v2",
             trace_id=f"ai-review-{uuid.uuid4().hex}",
         )
 

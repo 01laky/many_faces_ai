@@ -79,7 +79,13 @@ class AIModelService:
         self._tokenizer = None
         self._model = None
         self._loading = False
-        self._device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+        self._device = (
+            "cuda"
+            if torch.cuda.is_available()
+            else "mps"
+            if torch.backends.mps.is_available()
+            else "cpu"
+        )
 
     def _ensure_loaded(self):
         if self._model is not None:
@@ -89,7 +95,9 @@ class AIModelService:
         self._loading = True
         try:
             logger.info("Loading AI model: %s (first request)", self._model_name)
-            self._tokenizer = AutoTokenizer.from_pretrained(self._model_name, trust_remote_code=True)
+            self._tokenizer = AutoTokenizer.from_pretrained(
+                self._model_name, trust_remote_code=True
+            )
             dtype = torch.float16 if self._device in {"cuda", "mps"} else torch.float32
             self._model = AutoModelForCausalLM.from_pretrained(
                 self._model_name, torch_dtype=dtype, trust_remote_code=True
