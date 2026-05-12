@@ -37,7 +37,7 @@ echo "🔍 ai_demo verify-ci (python: $PY)..."
   protobuf==5.28.3
 
 # gRPC tests import `server.py`, which needs the same ML stack as local dev (CPU wheels).
-"$PIP" install -q numpy accelerate "transformers>=4.36" torch --index-url https://download.pytorch.org/whl/cpu
+"$PIP" install -q numpy accelerate "transformers>=4.36" torch --extra-index-url https://download.pytorch.org/whl/cpu
 
 "$PYEXE" -m grpc_tools.protoc -I proto --python_out=proto --grpc_python_out=proto proto/health.proto
 
