@@ -1,6 +1,6 @@
-# Pre-commit Hooks for AI Demo (Python)
+# pre-commit (Python) — many_faces_ai
 
-This project uses **pre-commit** framework for Python code quality checks.
+This project uses the **pre-commit** framework for Python code quality checks (not Husky; see **many_faces_portal** / **many_faces_admin** for Yarn + Husky examples).
 
 ## Installation
 

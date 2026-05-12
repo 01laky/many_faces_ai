@@ -90,17 +90,13 @@ many_faces_ai/
 │   ├── health.proto        # Health check service definition
 │   ├── health_pb2.py       # Generated Python message classes
 │   └── health_pb2_grpc.py  # Generated gRPC service stubs
+├── scripts/                # Shell helpers (proto generation, Docker dev, lint, verify-ci)
 ├── server.py               # gRPC server implementation
 ├── services/               # AI model service
 │   ├── __init__.py
 │   └── ai_model_service.py # Qwen wrapper (generate)
-├── generate_proto.sh       # Script to generate Python code from proto files
 ├── requirements.txt        # Python dependencies
 ├── Dockerfile.dev          # Development Dockerfile
-├── start-dev.sh            # Start development script
-├── stop-dev.sh             # Stop development script
-├── clear-dev.sh            # Clear containers script
-├── rebuild-dev.sh          # Rebuild Docker images script
 └── README.md               # This file
 ```
 
@@ -127,7 +123,7 @@ Use a smaller Qwen model for low-memory laptops, and a larger Qwen3 model for st
 The easiest way to run the AI Demo server in development:
 
 ```bash
-./start-dev.sh
+./scripts/start-dev.sh
 ```
 
 This script will:
@@ -147,7 +143,7 @@ docker-compose -f docker-compose.dev.yml up -d ai-demo-dev
 ### Stopping Services
 
 ```bash
-./stop-dev.sh
+./scripts/stop-dev.sh
 ```
 
 Or manually:
@@ -160,7 +156,7 @@ docker-compose -f docker-compose.dev.yml rm -f ai-demo-dev
 ### Clearing Everything
 
 ```bash
-./clear-dev.sh
+./scripts/clear-dev.sh
 ```
 
 This removes containers and images.
@@ -170,10 +166,10 @@ This removes containers and images.
 To perform a clean rebuild of Docker images:
 
 ```bash
-./rebuild-dev.sh
+./scripts/rebuild-dev.sh
 ```
 
-**Note**: This only builds images, it does NOT start containers. Use `./start-dev.sh` to start containers after rebuilding.
+**Note**: This only builds images, it does NOT start containers. Use `./scripts/start-dev.sh` to start containers after rebuilding.
 
 ### Local Development (Without Docker)
 
@@ -186,7 +182,7 @@ To perform a clean rebuild of Docker images:
 2. **Generate gRPC code from proto files**:
 
    ```bash
-   ./generate_proto.sh
+   ./scripts/generate_proto.sh
    ```
 
    This generates:
@@ -211,7 +207,7 @@ python3 -m venv .venv
 .venv/bin/pytest test_server.py -v
 ```
 
-Pinned versions in `requirements.txt` target **Python 3.11**. On **Python 3.13+**, installing those exact pins may try to build grpcio from source; use the unconstrained `grpcio` / `grpcio-tools` / `grpcio-testing` lines above (or matching wheels) so `pytest` can run. Generated stubs under `proto/` (`health_pb2.py`, `health_pb2_grpc.py`) must exist—run `./generate_proto.sh` or build via Docker. gRPC tests use the `grpc` marker (see `pytest.ini`).
+Pinned versions in `requirements.txt` target **Python 3.11**. On **Python 3.13+**, installing those exact pins may try to build grpcio from source; use the unconstrained `grpcio` / `grpcio-tools` / `grpcio-testing` lines above (or matching wheels) so `pytest` can run. Generated stubs under `proto/` (`health_pb2.py`, `health_pb2_grpc.py`) must exist—run `./scripts/generate_proto.sh` or build via Docker. gRPC tests use the `grpc` marker (see `pytest.ini`).
 
 ## gRPC Service
 
@@ -283,7 +279,7 @@ python -m grpc_tools.protoc -I./proto --python_out=./proto --grpc_python_out=./p
 **Locally**:
 
 ```bash
-./generate_proto.sh
+./scripts/generate_proto.sh
 ```
 
 This generates:
@@ -302,7 +298,7 @@ This generates:
    }
    ```
 
-2. **Regenerate proto files**: `./generate_proto.sh`
+2. **Regenerate proto files**: `./scripts/generate_proto.sh`
 
 3. **Implement method in `server.py`**:
 
@@ -311,7 +307,7 @@ This generates:
        return health_pb2.NewMethodResponse(status="ok")
    ```
 
-4. **Rebuild Docker image**: `./rebuild-dev.sh`
+4. **Rebuild Docker image**: `./scripts/rebuild-dev.sh`
 
 ## Testing
 
@@ -339,7 +335,7 @@ docker logs be-demo-dev | grep -i "ai service"
 
 1. **Start database**: Ensure PostgreSQL is running (via `many_faces_database` or monorepo `./scripts/start-all-dev.sh`)
 
-2. **Start AI Demo**: Run `./start-dev.sh` or use monorepo `./scripts/start-all-dev.sh` to start all services
+2. **Start AI Demo**: Run `./scripts/start-dev.sh` or use monorepo `./scripts/start-all-dev.sh` to start all services
 
 3. **Make code changes**: Edit `server.py` or `proto/health.proto`
 
@@ -347,9 +343,9 @@ docker logs be-demo-dev | grep -i "ai service"
    - Check service is responding: `docker logs ai-demo-dev`
    - Verify backend can connect (check backend logs)
 
-5. **Rebuild if needed**: `./rebuild-dev.sh` (if proto files changed)
+5. **Rebuild if needed**: `./scripts/rebuild-dev.sh` (if proto files changed)
 
-6. **Stop services**: Run `./stop-dev.sh` or monorepo `./scripts/stop-all-dev.sh`
+6. **Stop services**: Run `./scripts/stop-dev.sh` or monorepo `./scripts/stop-all-dev.sh`
 
 ## Integration with Root Project
 
@@ -357,7 +353,7 @@ This AI Demo is part of the **`many_faces_main`** monorepo (`many_faces_ai/` sub
 
 - **Backend API**: **many_faces_backend** (`many_faces_backend/`, ASP.NET Core) — connects on startup for health check
 
-Use root-level scripts to manage all services:
+From the **many_faces_main** repository root, use the orchestration scripts to manage all services:
 
 - `./scripts/start-all-dev.sh` - Start all services with live status screen
 - `./scripts/stop-all-dev.sh` - Stop all services
@@ -379,7 +375,7 @@ lsof -ti:50051
 lsof -ti:50051 | xargs kill -9
 
 # Or use clear script
-./clear-dev.sh
+./scripts/clear-dev.sh
 ```
 
 ### Proto Files Not Generated
@@ -388,7 +384,7 @@ If you see `ModuleNotFoundError` for proto files:
 
 - Proto files are generated during Docker build
 - Check `Dockerfile.dev` for proto generation steps
-- If needed, manually run `./generate_proto.sh` before starting container
+- If needed, manually run `./scripts/generate_proto.sh` before starting container
 
 ### Backend Cannot Connect
 

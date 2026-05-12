@@ -27,6 +27,10 @@ proto/*_pb2_grpc.py
 *.swp
 *.swo
 
+# Tool caches (local; never commit)
+.pytest_cache/
+.ruff_cache/
+
 # OS
 .DS_Store
 Thumbs.db
