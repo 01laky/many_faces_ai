@@ -353,7 +353,7 @@ docker logs be-demo-dev | grep -i "ai service"
 
 ## Integration with Root Project
 
-This AI Demo is part of the `_mfai_demo` monorepo and integrates with:
+This AI Demo is part of the **`many_faces_main`** monorepo (`ai_demo/` submodule on GitHub: `many_faces_ai`) and integrates with:
 
 - **Backend API**: `be_demo` (ASP.NET Core) - connects on startup for health check
 
