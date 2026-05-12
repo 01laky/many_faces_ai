@@ -21,7 +21,7 @@ echo ""
 
 # Remove old images
 echo "🧹 Removing old Docker images..."
-docker images | grep -E "ai_demo|ai-demo" | awk '{print $3}' | xargs docker rmi -f 2>/dev/null || true
+docker images | grep -E "many_faces_ai|ai-demo" | awk '{print $3}' | xargs docker rmi -f 2>/dev/null || true
 
 # Build new image with --no-cache (clean build)
 echo "🔨 Building fresh Docker image (no cache)..."

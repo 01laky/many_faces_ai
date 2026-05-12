@@ -1,10 +1,10 @@
 # AI Demo - gRPC Server
 
-Python gRPC server providing **health checks**, optional **local Qwen text generation**, and structured **`ReviewContent`** responses for the user-content moderation pipeline used by **many_faces_backend** (`be_demo/`).
+Python gRPC server providing **health checks**, optional **local Qwen text generation**, and structured **`ReviewContent`** responses for the user-content moderation pipeline used by **many_faces_backend** (`many_faces_backend/`).
 
 ## Overview
 
-The AI Demo (**many_faces_ai**; monorepo path `ai_demo/`) is a Python-based gRPC server. The backend API (**many_faces_backend** / `be_demo/`) connects on startup for **health verification**, optional **Qwen-backed `Generate`**, and the **`ReviewContent`** contract used by the user-content moderation worker.
+The AI Demo (**many_faces_ai**; monorepo path `many_faces_ai/`) is a Python-based gRPC server. The backend API (**many_faces_backend** / `many_faces_backend/`) connects on startup for **health verification**, optional **Qwen-backed `Generate`**, and the **`ReviewContent`** contract used by the user-content moderation worker.
 
 In the broader Many Faces AI architecture, this submodule is the AI workspace for application-aware intelligence. **Implemented today:** gRPC `Health`, `Generate` (local Qwen), and `ReviewContent` — a deterministic classifier over text and media URL metadata that returns approve / reject / needs-human-review with confidence, risk, flags, reasons, and optional **`image_analysis_boundary`** / **`video_analysis_boundary`** policy flags (placeholders for heavier CV models; the demo classifier does not treat them as sole auto-reject triggers). The longer-term direction is richer context snapshots, admin reports, and chat-security RPCs.
 
@@ -37,7 +37,7 @@ The following areas would make the AI submodule more useful as the platform grow
 
 ## AI-Assisted Content Approval Role
 
-The content approval workflow uses this service as an **advisory** reviewer for regular FE user-created albums, blogs, and reels. The service **never** publishes or deletes rows in PostgreSQL: it only answers `ReviewContent`. **many_faces_backend** (`be_demo/`) enqueues Redis jobs, calls gRPC, validates ranges and policy, retries with backoff, and only `SUPER_ADMIN` (or future explicit auto-policy) may set final `ApprovalStatus`. Full process guide: [`docs/guides/ai-assisted-content-approval.md`](../docs/guides/ai-assisted-content-approval.md).
+The content approval workflow uses this service as an **advisory** reviewer for regular FE user-created albums, blogs, and reels. The service **never** publishes or deletes rows in PostgreSQL: it only answers `ReviewContent`. **many_faces_backend** (`many_faces_backend/`) enqueues Redis jobs, calls gRPC, validates ranges and policy, retries with backoff, and only `SUPER_ADMIN` (or future explicit auto-policy) may set final `ApprovalStatus`. Full process guide: [`docs/guides/ai-assisted-content-approval.md`](../docs/guides/ai-assisted-content-approval.md).
 
 Target responsibilities:
 
@@ -46,7 +46,7 @@ Target responsibilities:
 - Return a structured decision: `approve`, `reject`, or `needs_human_review`.
 - Include confidence, risk level, flags, internal reason, safe user-facing message, model version, and trace id.
 - Avoid autonomous side effects; all durable state changes stay in the API.
-- Support auditability with stable trace metadata; automated tests live in `ai_demo/test_server.py`.
+- Support auditability with stable trace metadata; automated tests live in `many_faces_ai/test_server.py`.
 
 Safety rule:
 
@@ -85,7 +85,7 @@ This keeps the AI service useful without making it an uncontrolled publisher.
 ## Project Structure
 
 ```
-ai_demo/
+many_faces_ai/
 ├── proto/                  # Protocol buffer definitions
 │   ├── health.proto        # Health check service definition
 │   ├── health_pb2.py       # Generated Python message classes
@@ -203,7 +203,7 @@ To perform a clean rebuild of Docker images:
 
 ### Local unit tests (pytest)
 
-From `ai_demo/`:
+From `many_faces_ai/`:
 
 ```bash
 python3 -m venv .venv
@@ -329,7 +329,7 @@ grpcurl -plaintext -d '{}' localhost:50051 HealthService/HealthCheck
 
 ### From Backend API
 
-The backend API (**many_faces_backend** / `be_demo/`) calls the health check on startup. Check backend logs to verify the connection:
+The backend API (**many_faces_backend** / `many_faces_backend/`) calls the health check on startup. Check backend logs to verify the connection:
 
 ```bash
 docker logs be-demo-dev | grep -i "ai service"
@@ -337,7 +337,7 @@ docker logs be-demo-dev | grep -i "ai service"
 
 ## Development Workflow
 
-1. **Start database**: Ensure PostgreSQL is running (via `db_demo` or monorepo `./scripts/start-all-dev.sh`)
+1. **Start database**: Ensure PostgreSQL is running (via `many_faces_database` or monorepo `./scripts/start-all-dev.sh`)
 
 2. **Start AI Demo**: Run `./start-dev.sh` or use monorepo `./scripts/start-all-dev.sh` to start all services
 
@@ -353,9 +353,9 @@ docker logs be-demo-dev | grep -i "ai service"
 
 ## Integration with Root Project
 
-This AI Demo is part of the **`many_faces_main`** monorepo (`ai_demo/` submodule on GitHub: `many_faces_ai`) and integrates with:
+This AI Demo is part of the **`many_faces_main`** monorepo (`many_faces_ai/` submodule on GitHub: `many_faces_ai`) and integrates with:
 
-- **Backend API**: **many_faces_backend** (`be_demo/`, ASP.NET Core) — connects on startup for health check
+- **Backend API**: **many_faces_backend** (`many_faces_backend/`, ASP.NET Core) — connects on startup for health check
 
 Use root-level scripts to manage all services:
 

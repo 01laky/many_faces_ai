@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Lint ai_demo (ruff check + ruff format --check)
+# Lint many_faces_ai (ruff check + ruff format --check)
 # Usage: ./lint.sh
 
 set -e
@@ -8,7 +8,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-echo "🔍 Linting ai_demo..."
+echo "🔍 Linting many_faces_ai..."
 echo ""
 
 # Use ruff if available (from venv or PATH)
@@ -47,4 +47,4 @@ else
 fi
 
 echo ""
-echo "✅ ai_demo lint passed"
+echo "✅ many_faces_ai lint passed"

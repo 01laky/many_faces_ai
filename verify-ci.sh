@@ -27,7 +27,7 @@ fi
 PIP="$VENVDIR/bin/pip"
 PYEXE="$VENVDIR/bin/python"
 
-echo "🔍 ai_demo verify-ci (python: $PY)..."
+echo "🔍 many_faces_ai verify-ci (python: $PY)..."
 "$PIP" install -q --upgrade pip setuptools wheel
 # Pinned set with wheels for Python 3.11–3.13 (1.60.x often fails to build on 3.13).
 "$PIP" install -q ruff pytest \
@@ -46,4 +46,4 @@ echo "🔍 ai_demo verify-ci (python: $PY)..."
 
 PYTHONPATH="$ROOT" "$VENVDIR/bin/pytest" test_server.py -q
 
-echo "✅ ai_demo verify-ci passed"
+echo "✅ many_faces_ai verify-ci passed"
