@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Script to start AI Demo gRPC server in development mode
+# Script to start Many Faces AI gRPC server in development mode
 # Usage: ./start-dev.sh
 
 set -e
@@ -8,7 +8,7 @@ set -e
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-echo "🚀 Starting AI Demo gRPC server..."
+echo "🚀 Starting Many Faces AI gRPC server..."
 echo ""
 
 # Check if Docker is running
@@ -36,7 +36,7 @@ sleep 3
 
 # Check if server is running
 if docker ps | grep -q ai-demo-dev; then
-    echo "✅ AI Demo gRPC server started successfully!"
+    echo "✅ Many Faces AI gRPC server started successfully!"
     echo ""
     echo "📋 Server information:"
     echo "   Container: ai-demo-dev"

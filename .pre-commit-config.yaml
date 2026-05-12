@@ -1,4 +1,4 @@
-# Pre-commit hooks configuration for AI Demo (Python)
+# Pre-commit hooks configuration for Many Faces AI service (Python)
 # Install: pip install pre-commit
 # Setup: pre-commit install
 

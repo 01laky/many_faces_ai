@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# rebuild-dev.sh - Script to rebuild AI Demo Docker image from scratch
+# rebuild-dev.sh - Script to rebuild Many Faces AI Docker image from scratch
 #
 # This script performs a clean rebuild of the Docker image by:
 # 1. Removing old Docker images
@@ -16,7 +16,7 @@ set -e
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-echo "🔨 Rebuilding AI Demo Docker image (clean build)..."
+echo "🔨 Rebuilding Many Faces AI Docker image (clean build)..."
 echo ""
 
 # Remove old images

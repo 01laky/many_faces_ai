@@ -1,12 +1,12 @@
-# AI Demo - gRPC Server
+# Many Faces AI service - gRPC Server
 
 Python gRPC server providing **health checks**, optional **local Qwen text generation**, and structured **`ReviewContent`** responses for the user-content moderation pipeline used by **many_faces_backend** (`many_faces_backend/`).
 
 ## Overview
 
-The AI Demo (**many_faces_ai**; monorepo path `many_faces_ai/`) is a Python-based gRPC server. The backend API (**many_faces_backend** / `many_faces_backend/`) connects on startup for **health verification**, optional **Qwen-backed `Generate`**, and the **`ReviewContent`** contract used by the user-content moderation worker.
+The Many Faces AI service (**many_faces_ai**; monorepo path `many_faces_ai/`) is a Python-based gRPC server. The backend API (**many_faces_backend** / `many_faces_backend/`) connects on startup for **health verification**, optional **Qwen-backed `Generate`**, and the **`ReviewContent`** contract used by the user-content moderation worker.
 
-In the broader Many Faces AI architecture, this submodule is the AI workspace for application-aware intelligence. **Implemented today:** gRPC `Health`, `Generate` (local Qwen), and `ReviewContent` — a deterministic classifier over text and media URL metadata that returns approve / reject / needs-human-review with confidence, risk, flags, reasons, and optional **`image_analysis_boundary`** / **`video_analysis_boundary`** policy flags (placeholders for heavier CV models; the demo classifier does not treat them as sole auto-reject triggers). The longer-term direction is richer context snapshots, admin reports, and chat-security RPCs.
+In the broader Many Faces AI architecture, this submodule is the AI workspace for application-aware intelligence. **Implemented today:** gRPC `Health`, `Generate` (local Qwen), and `ReviewContent` — a deterministic classifier over text and media URL metadata that returns approve / reject / needs-human-review with confidence, risk, flags, reasons, and optional **`image_analysis_boundary`** / **`video_analysis_boundary`** policy flags (placeholders for heavier CV models; this reference classifier does not treat them as sole auto-reject triggers). The longer-term direction is richer context snapshots, admin reports, and chat-security RPCs.
 
 The goal is for the AI service to understand the application's structure instead of acting as a generic text generator. Future capabilities can use face configuration, page layouts, grid components, roles, content modules, and backend metadata as context for more useful responses. That makes the service a natural place for application-context summaries, admin-facing insights, feature recommendations, and guided diagnostics across the MFAI platform.
 
@@ -120,7 +120,7 @@ Use a smaller Qwen model for low-memory laptops, and a larger Qwen3 model for st
 
 ### Running in Docker Container (Recommended)
 
-The easiest way to run the AI Demo server in development:
+The easiest way to run the Many Faces AI server in development:
 
 ```bash
 ./scripts/start-dev.sh
@@ -219,7 +219,7 @@ The service provides a `HealthCheck` RPC method:
 - **Request**: `HealthCheckRequest` (empty message)
 - **Response**: `HealthCheckResponse` with:
   - `status` - Service status (e.g., "success")
-  - `message` - Status message (e.g., "AI Demo service is running")
+  - `message` - Status message (e.g., "Many Faces AI service service is running")
 
 ### Generate (AI text generation)
 
@@ -335,7 +335,7 @@ docker logs be-demo-dev | grep -i "ai service"
 
 1. **Start database**: Ensure PostgreSQL is running (via `many_faces_database` or monorepo `./scripts/start-all-dev.sh`)
 
-2. **Start AI Demo**: Run `./scripts/start-dev.sh` or use monorepo `./scripts/start-all-dev.sh` to start all services
+2. **Start Many Faces AI service**: Run `./scripts/start-dev.sh` or use monorepo `./scripts/start-all-dev.sh` to start all services
 
 3. **Make code changes**: Edit `server.py` or `proto/health.proto`
 
@@ -349,7 +349,7 @@ docker logs be-demo-dev | grep -i "ai service"
 
 ## Integration with Root Project
 
-This AI Demo is part of the **`many_faces_main`** monorepo (`many_faces_ai/` submodule on GitHub: `many_faces_ai`) and integrates with:
+This Many Faces AI service is part of the **`many_faces_main`** monorepo (`many_faces_ai/` submodule on GitHub: `many_faces_ai`) and integrates with:
 
 - **Backend API**: **many_faces_backend** (`many_faces_backend/`, ASP.NET Core) — connects on startup for health check
 
@@ -388,7 +388,7 @@ If you see `ModuleNotFoundError` for proto files:
 
 ### Backend Cannot Connect
 
-- Ensure AI Demo container is running: `docker ps | grep ai-demo-dev`
+- Ensure Many Faces AI service container is running: `docker ps | grep ai-demo-dev`
 - Check network: Both services should be on `many_faces_main_dev-network`
 - Verify port: Default is 50051
 - Check backend logs: `docker logs be-demo-dev | grep -i ai`
