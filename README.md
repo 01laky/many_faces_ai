@@ -37,7 +37,7 @@ The following areas would make the AI submodule more useful as the platform grow
 
 ## AI-Assisted Content Approval Role
 
-The planned content approval workflow uses this service as an AI reviewer for regular FE user-created albums, blogs, and reels. The AI service should not directly publish or remove content. It should return a structured recommendation to the backend, and the backend/admin workflow decides the final status. Full process guide: [`docs/guides/ai-assisted-content-approval.md`](../docs/guides/ai-assisted-content-approval.md).
+The content approval workflow uses this service as an AI reviewer for regular FE user-created albums, blogs, and reels. The AI service does not directly publish or remove content. It exposes a typed `ReviewContent` gRPC method that returns a structured recommendation to the backend, and the backend/admin workflow decides the final status. Full process guide: [`docs/guides/ai-assisted-content-approval.md`](../docs/guides/ai-assisted-content-approval.md).
 
 Target responsibilities:
 

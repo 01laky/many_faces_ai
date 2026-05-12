@@ -14,6 +14,9 @@ service HealthService {
   // Generate completes the given prompt using the local AI model (DistilGPT-2)
   // Returns the generated text (prompt + continuation)
   rpc Generate (GenerateRequest) returns (GenerateResponse);
+
+  // ReviewContent returns a structured moderation recommendation for user-created content.
+  rpc ReviewContent (ContentReviewRequest) returns (ContentReviewResponse);
 }
 
 // Request message for health check
@@ -45,4 +48,27 @@ message GenerateResponse {
   string text = 1;
   // Optional error message if generation failed
   string error = 2;
+}
+
+message ContentReviewRequest {
+  string content_type = 1;
+  int32 content_id = 2;
+  int32 moderation_version = 3;
+  int32 face_id = 4;
+  string title = 5;
+  string body = 6;
+  string media_url = 7;
+  string creator_id = 8;
+}
+
+message ContentReviewResponse {
+  string decision = 1;
+  double confidence = 2;
+  string risk_level = 3;
+  repeated string flags = 4;
+  string reason = 5;
+  string user_message = 6;
+  string model_version = 7;
+  string trace_id = 8;
+  string error = 9;
 }

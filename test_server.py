@@ -89,6 +89,48 @@ class TestHealthServiceServicer:
         assert response3.status == "success"
         assert response1.message == response2.message == response3.message
 
+    def test_review_content_returns_structured_approval_recommendation(self, servicer, mock_context):
+        """Test baseline content moderation response shape for safe content"""
+        request = health_pb2.ContentReviewRequest(
+            content_type="Blog",
+            content_id=42,
+            moderation_version=1,
+            face_id=1,
+            title="Community update",
+            body="A normal update for the community.",
+            creator_id="user-1",
+        )
+
+        response = servicer.ReviewContent(request, mock_context)
+
+        assert response.decision == "approve"
+        assert response.risk_level == "low"
+        assert 0 <= response.confidence <= 1
+        assert response.model_version == "moderation-heuristic-v1"
+        assert response.trace_id.startswith("ai-review-")
+        assert response.error == ""
+
+    def test_review_content_flags_unsafe_content(self, servicer, mock_context):
+        """Test baseline moderation detects unsafe terms and recommends rejection"""
+        request = health_pb2.ContentReviewRequest(
+            content_type="Reel",
+            content_id=43,
+            moderation_version=1,
+            face_id=1,
+            title="Adult spam",
+            body="This looks like adult scam content.",
+            media_url="javascript:alert(1)",
+            creator_id="user-1",
+        )
+
+        response = servicer.ReviewContent(request, mock_context)
+
+        assert response.decision == "reject"
+        assert response.risk_level == "high"
+        assert "adult" in response.flags
+        assert "spam" in response.flags
+        assert "unsafe_link" in response.flags
+
 
 class TestServerIntegration:
     """Integration tests for gRPC server"""

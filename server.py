@@ -15,6 +15,7 @@ import logging
 import os
 import sys
 import threading
+import uuid
 from concurrent import futures
 
 import grpc
@@ -159,9 +160,68 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
                 )
             logger.exception("Generate failed: %s", e)
             return health_pb2.GenerateResponse(text="", error=str(e))
-        except Exception as e:
-            logger.exception("Generate failed: %s", e)
-            return health_pb2.GenerateResponse(text="", error=str(e))
+
+    def ReviewContent(self, request, context):
+        """
+        Return a deterministic structured moderation recommendation.
+
+        This first service-side implementation is intentionally conservative. It gives the
+        backend a typed AI contract and model trace, but final publish/remove decisions still
+        remain in the backend/admin moderation workflow.
+        """
+        title = (request.title or "").strip()
+        body = (request.body or "").strip()
+        media_url = (request.media_url or "").strip()
+        text = f"{title} {body} {media_url}".lower()
+        flags = []
+        risk_level = "low"
+        decision = "approve"
+        confidence = 0.82
+        reason = "No obvious policy or quality issue was detected by the baseline moderation heuristic."
+        user_message = "Your content is waiting for final review."
+
+        unsafe_terms = {
+            "spam": "spam",
+            "scam": "spam",
+            "hate": "hate",
+            "adult": "adult",
+            "porn": "adult",
+            "violence": "violence",
+            "malware": "unsafe_link",
+            "phishing": "unsafe_link",
+        }
+        for term, flag in unsafe_terms.items():
+            if term in text and flag not in flags:
+                flags.append(flag)
+
+        if media_url and not (
+            media_url.startswith("http://") or media_url.startswith("https://")
+        ):
+            flags.append("unsafe_link")
+
+        if flags:
+            risk_level = "high" if any(flag in {"hate", "adult", "violence"} for flag in flags) else "medium"
+            decision = "reject" if risk_level == "high" else "needs_human_review"
+            confidence = 0.88 if risk_level == "high" else 0.72
+            reason = f"Potential moderation flags detected: {', '.join(sorted(set(flags)))}."
+            user_message = "Your content needs changes before it can be published."
+        elif len(title) < 3 or (not body and not media_url):
+            flags.append("low_quality")
+            risk_level = "medium"
+            decision = "needs_human_review"
+            confidence = 0.7
+            reason = "The submission has limited reviewable content."
+
+        return health_pb2.ContentReviewResponse(
+            decision=decision,
+            confidence=confidence,
+            risk_level=risk_level,
+            flags=sorted(set(flags)),
+            reason=reason,
+            user_message=user_message,
+            model_version="moderation-heuristic-v1",
+            trace_id=f"ai-review-{uuid.uuid4().hex}",
+        )
 
 
 def serve():
