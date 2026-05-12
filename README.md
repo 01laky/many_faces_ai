@@ -1,10 +1,10 @@
 # AI Demo - gRPC Server
 
-Python gRPC server providing **health checks**, optional **local Qwen text generation**, and structured **`ReviewContent`** responses for the user-content moderation pipeline used by `be_demo`.
+Python gRPC server providing **health checks**, optional **local Qwen text generation**, and structured **`ReviewContent`** responses for the user-content moderation pipeline used by **many_faces_backend** (`be_demo/`).
 
 ## Overview
 
-The AI Demo (ai_demo) is a Python-based gRPC server. The backend API (`be_demo`) connects on startup for **health verification**, optional **Qwen-backed `Generate`**, and the **`ReviewContent`** contract used by the user-content moderation worker.
+The AI Demo (**many_faces_ai**; monorepo path `ai_demo/`) is a Python-based gRPC server. The backend API (**many_faces_backend** / `be_demo/`) connects on startup for **health verification**, optional **Qwen-backed `Generate`**, and the **`ReviewContent`** contract used by the user-content moderation worker.
 
 In the broader Many Faces AI architecture, this submodule is the AI workspace for application-aware intelligence. **Implemented today:** gRPC `Health`, `Generate` (local Qwen), and `ReviewContent` — a deterministic classifier over text and media URL metadata that returns approve / reject / needs-human-review with confidence, risk, flags, reasons, and optional **`image_analysis_boundary`** / **`video_analysis_boundary`** policy flags (placeholders for heavier CV models; the demo classifier does not treat them as sole auto-reject triggers). The longer-term direction is richer context snapshots, admin reports, and chat-security RPCs.
 
@@ -37,7 +37,7 @@ The following areas would make the AI submodule more useful as the platform grow
 
 ## AI-Assisted Content Approval Role
 
-The content approval workflow uses this service as an **advisory** reviewer for regular FE user-created albums, blogs, and reels. The service **never** publishes or deletes rows in PostgreSQL: it only answers `ReviewContent`. `be_demo` enqueues Redis jobs, calls gRPC, validates ranges and policy, retries with backoff, and only `SUPER_ADMIN` (or future explicit auto-policy) may set final `ApprovalStatus`. Full process guide: [`docs/guides/ai-assisted-content-approval.md`](../docs/guides/ai-assisted-content-approval.md).
+The content approval workflow uses this service as an **advisory** reviewer for regular FE user-created albums, blogs, and reels. The service **never** publishes or deletes rows in PostgreSQL: it only answers `ReviewContent`. **many_faces_backend** (`be_demo/`) enqueues Redis jobs, calls gRPC, validates ranges and policy, retries with backoff, and only `SUPER_ADMIN` (or future explicit auto-policy) may set final `ApprovalStatus`. Full process guide: [`docs/guides/ai-assisted-content-approval.md`](../docs/guides/ai-assisted-content-approval.md).
 
 Target responsibilities:
 
@@ -266,7 +266,7 @@ environment:
 
 ### Network Configuration
 
-The service runs on the `mfai_demo_dev-network` Docker network, allowing other services (like the backend API) to connect using the service name `ai-demo-dev` or container name.
+The service runs on the `many_faces_main_dev-network` Docker network, allowing other services (like the backend API) to connect using the service name `ai-demo-dev` or container name.
 
 ## Development
 
@@ -329,7 +329,7 @@ grpcurl -plaintext -d '{}' localhost:50051 HealthService/HealthCheck
 
 ### From Backend API
 
-The backend API (be_demo) calls the health check on startup. Check backend logs to verify the connection:
+The backend API (**many_faces_backend** / `be_demo/`) calls the health check on startup. Check backend logs to verify the connection:
 
 ```bash
 docker logs be-demo-dev | grep -i "ai service"
@@ -355,7 +355,7 @@ docker logs be-demo-dev | grep -i "ai service"
 
 This AI Demo is part of the **`many_faces_main`** monorepo (`ai_demo/` submodule on GitHub: `many_faces_ai`) and integrates with:
 
-- **Backend API**: `be_demo` (ASP.NET Core) - connects on startup for health check
+- **Backend API**: **many_faces_backend** (`be_demo/`, ASP.NET Core) — connects on startup for health check
 
 Use root-level scripts to manage all services:
 
@@ -393,7 +393,7 @@ If you see `ModuleNotFoundError` for proto files:
 ### Backend Cannot Connect
 
 - Ensure AI Demo container is running: `docker ps | grep ai-demo-dev`
-- Check network: Both services should be on `mfai_demo_dev-network`
+- Check network: Both services should be on `many_faces_main_dev-network`
 - Verify port: Default is 50051
 - Check backend logs: `docker logs be-demo-dev | grep -i ai`
 
