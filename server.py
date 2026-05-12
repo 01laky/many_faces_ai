@@ -14,7 +14,6 @@ Usage:
 import logging
 import os
 import sys
-import threading
 import uuid
 from concurrent import futures
 
@@ -86,12 +85,12 @@ except (ImportError, ModuleNotFoundError, FileNotFoundError) as e:
     )
     raise ImportError("gRPC stubs missing or invalid; run ./generate_proto.sh from ai_demo/") from e
 
-# Import AI model service – communicates with local DistilGPT-2 model
+# Import AI model service - communicates with a local Qwen instruct model
 try:
     from services.ai_model_service import AIModelService
 
     _ai_service = AIModelService()
-    logger.info("AIModelService ready (model will load on first Generate request)")
+    logger.info("AIModelService ready (Qwen model will load on first Generate request)")
 except ImportError as e:
     logger.warning("AIModelService not available: %s – Generate RPC will not work", e)
     _ai_service = None
@@ -129,7 +128,7 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
         """
         AI text generation RPC method.
 
-        Completes the given prompt using the local DistilGPT-2 model.
+        Completes the given prompt using the configured local Qwen model.
         The model is loaded into memory on first call (lazy loading).
 
         Args:
@@ -261,19 +260,6 @@ def serve():
     # Start the server
     server.start()
     logger.info(f"gRPC server started on {server_address}")
-
-    # Pre-load model in background so first user request doesn't wait 3-5 min
-    def _warmup_model():
-        if _ai_service is not None:
-            try:
-                logger.info("Pre-loading AI model (background warmup)...")
-                _ai_service.generate("Hi", max_new_tokens=3)
-                logger.info("AI model pre-loaded, ready for requests")
-            except Exception as e:
-                logger.warning("Model warmup failed (will load on first request): %s", e)
-
-    warmup_thread = threading.Thread(target=_warmup_model, daemon=True)
-    warmup_thread.start()
 
     try:
         # Keep the server running

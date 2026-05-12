@@ -6,7 +6,7 @@ Python gRPC server providing health check functionality for the AI Demo service.
 
 The AI Demo (ai_demo) is a Python-based gRPC server that provides health check functionality for AI services. The backend API (be_demo) connects to this service on startup to verify that AI services are available and operational.
 
-In the broader Many Faces AI architecture, this submodule is intended to become the AI workspace for application-aware intelligence. Today it provides the gRPC service foundation, health checks, and local text generation experiments; the longer-term direction is to connect AI features to the product context, operational reports, feature management, and safety-sensitive chat workflows.
+In the broader Many Faces AI architecture, this submodule is intended to become the AI workspace for application-aware intelligence. Today it provides the gRPC service foundation, health checks, local Qwen text generation, and structured content-review recommendations; the longer-term direction is to connect AI features to the product context, operational reports, feature management, and safety-sensitive chat workflows.
 
 The goal is for the AI service to understand the application's structure instead of acting as a generic text generator. Future capabilities can use face configuration, page layouts, grid components, roles, content modules, and backend metadata as context for more useful responses. That makes the service a natural place for application-context summaries, admin-facing insights, feature recommendations, and guided diagnostics across the MFAI platform.
 
@@ -62,7 +62,8 @@ This keeps the AI service useful without making it an uncontrolled publisher.
   - High-performance RPC communication
   - Protocol Buffers for data serialization
   - Health check endpoint
-  - **AI text generation** — `Generate` RPC with local DistilGPT-2 (no API key)
+  - **AI text generation** - `Generate` RPC with local Qwen (no API key)
+  - **Content review** - `ReviewContent` RPC for structured moderation recommendations
 
 - **Docker Support**
   - Containerized development environment
@@ -92,7 +93,7 @@ ai_demo/
 ├── server.py               # gRPC server implementation
 ├── services/               # AI model service
 │   ├── __init__.py
-│   └── ai_model_service.py # DistilGPT-2 wrapper (generate)
+│   └── ai_model_service.py # Qwen wrapper (generate)
 ├── generate_proto.sh       # Script to generate Python code from proto files
 ├── requirements.txt        # Python dependencies
 ├── Dockerfile.dev          # Development Dockerfile
@@ -104,6 +105,22 @@ ai_demo/
 ```
 
 ## Running
+
+## Model Selection
+
+The default local LLM is:
+
+- `Qwen/Qwen3-4B-Instruct-2507`
+
+This is a free/open-weight Qwen3 instruct model and a practical default for local development. Larger Qwen variants such as `Qwen/Qwen3-30B-A3B-Instruct-2507` can provide stronger reasoning, but they require significantly more memory and are better served through a dedicated inference runtime such as vLLM.
+
+You can override the model without changing code:
+
+```bash
+export MFAI_AI_MODEL_NAME="Qwen/Qwen3-0.6B"
+```
+
+Use a smaller Qwen model for low-memory laptops, and a larger Qwen3 model for stronger admin/chat reasoning when hardware allows.
 
 ### Running in Docker Container (Recommended)
 

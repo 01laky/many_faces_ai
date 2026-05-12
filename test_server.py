@@ -23,6 +23,7 @@ try:
     import grpc_testing  # noqa: F401 - availability check
 
     import server
+    from services.ai_model_service import DEFAULT_MODEL_NAME, AIModelService
 
     health_pb2 = server.health_pb2
     health_pb2_grpc = server.health_pb2_grpc
@@ -130,6 +131,14 @@ class TestHealthServiceServicer:
         assert "adult" in response.flags
         assert "spam" in response.flags
         assert "unsafe_link" in response.flags
+
+    def test_ai_model_service_defaults_to_qwen3_with_env_override(self, monkeypatch):
+        """Test configured model defaults without loading model weights"""
+        assert DEFAULT_MODEL_NAME == "Qwen/Qwen3-4B-Instruct-2507"
+
+        monkeypatch.setenv("MFAI_AI_MODEL_NAME", "Qwen/Qwen3-0.6B")
+        service = AIModelService()
+        assert service._model_name == "Qwen/Qwen3-0.6B"
 
 
 class TestServerIntegration:

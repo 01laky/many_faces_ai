@@ -2,21 +2,23 @@
 """
 ai_model_service.py - Multilingual conversational AI service
 
-Model: Qwen/Qwen2.5-0.5B-Instruct (smallest in Qwen2.5 series, ~0.5B params, ~300MB)
-- Instruction-tuned, multilingual
-- Supports 29+ languages including English, Slovak, Czech, etc.
-- Runs locally on CPU, no API key required
+Model: Qwen/Qwen3-4B-Instruct-2507 by default
+- Instruction-tuned, multilingual, open-weight Qwen3 model
+- Supports English, Slovak, Czech, and other languages
+- Runs locally with Hugging Face Transformers, no API key required
+- Can be overridden with MFAI_AI_MODEL_NAME for smaller or larger Qwen variants
 - License: Apache 2.0
 """
 
 import logging
+import os
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL_NAME = "Qwen/Qwen2.5-0.5B-Instruct"
+DEFAULT_MODEL_NAME = "Qwen/Qwen3-4B-Instruct-2507"
 DEFAULT_MAX_NEW_TOKENS = 200
 
 SYSTEM_PROMPT = """You are MFAI Assistant – an intelligent, friendly and knowledgeable AI assistant built into the MFAI Demo application.
@@ -31,7 +33,7 @@ The application you are part of consists of these components:
 - **Frontend (fe_demo)** – React + TypeScript + Vite application for end users (port 8081)
 - **Admin panel (admin_demo)** – React + TypeScript + Vite admin panel where this chat lives (port 8082)
 - **Backend API (be_demo)** – ASP.NET Core (.NET 10) REST API with SignalR for real-time chat (port 8000)
-- **AI Service (ai_demo)** – Python gRPC server running the Qwen2.5-0.5B-Instruct language model (port 50051)
+- **AI Service (ai_demo)** – Python gRPC server running a local Qwen model (port 50051)
 - **Database** – PostgreSQL for data storage (port 5432)
 - **Logger** – Seq for centralized logging, Dozzle for Docker log viewing
 - Everything runs in Docker containers orchestrated by docker-compose.
@@ -65,18 +67,19 @@ You have solid knowledge of these technologies and can help with questions about
 
 class AIModelService:
     """
-    Multilingual conversational AI service backed by Qwen2.5-0.5B-Instruct.
+    Multilingual conversational AI service backed by a local Qwen instruct model.
 
     Uses the model's built-in chat template to produce natural multi-turn
     conversation in any language the user writes in.
     The model is loaded lazily on the first generate() call.
     """
 
-    def __init__(self, model_name: str = DEFAULT_MODEL_NAME):
-        self._model_name = model_name
+    def __init__(self, model_name: str | None = None):
+        self._model_name = model_name or os.getenv("MFAI_AI_MODEL_NAME", DEFAULT_MODEL_NAME)
         self._tokenizer = None
         self._model = None
         self._loading = False
+        self._device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 
     def _ensure_loaded(self):
         if self._model is not None:
@@ -86,12 +89,13 @@ class AIModelService:
         self._loading = True
         try:
             logger.info("Loading AI model: %s (first request)", self._model_name)
-            self._tokenizer = AutoTokenizer.from_pretrained(self._model_name)
+            self._tokenizer = AutoTokenizer.from_pretrained(self._model_name, trust_remote_code=True)
+            dtype = torch.float16 if self._device in {"cuda", "mps"} else torch.float32
             self._model = AutoModelForCausalLM.from_pretrained(
-                self._model_name, torch_dtype=torch.float16
-            )
+                self._model_name, torch_dtype=dtype, trust_remote_code=True
+            ).to(self._device)
             self._model.eval()
-            logger.info("AI model %s loaded successfully.", self._model_name)
+            logger.info("AI model %s loaded successfully on %s.", self._model_name, self._device)
         except Exception:
             self._loading = False
             raise
@@ -134,7 +138,7 @@ class AIModelService:
             input_text = tok.apply_chat_template(
                 messages, tokenize=False, add_generation_prompt=True
             )
-            input_ids = tok.encode(input_text, return_tensors="pt")
+            input_ids = tok.encode(input_text, return_tensors="pt").to(self._device)
 
             # Trim to fit context window
             if input_ids.shape[-1] > 1800:
