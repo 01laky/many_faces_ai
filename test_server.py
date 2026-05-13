@@ -222,7 +222,9 @@ class TestHealthServiceServicer:
         assert response.decision == "needs_human_review"
         assert "low_quality" in response.flags
 
-    def test_review_content_sanitizes_inputs_before_keyword_classification(self, servicer, mock_context):
+    def test_review_content_sanitizes_inputs_before_keyword_classification(
+        self, servicer, mock_context
+    ):
         """Zero-width characters must not break substring-based policy terms."""
         zw = "\u200b"
         request = health_pb2.ContentReviewRequest(

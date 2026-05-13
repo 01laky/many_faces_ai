@@ -147,8 +147,6 @@ except ImportError as e:
     logger.warning("AIModelService not available: %s – Generate RPC will not work", e)
     _ai_service = None
 
-from moderation_input_sanitize import sanitize_for_review
-
 
 class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
     """
@@ -228,6 +226,8 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
 
         The backend still validates confidence/decision ranges and never auto-publishes solely on this response.
         """
+        from moderation_input_sanitize import sanitize_for_review
+
         title, body, media_url = sanitize_for_review(
             request.title, request.body, request.media_url or None
         )
