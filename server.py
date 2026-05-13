@@ -147,6 +147,8 @@ except ImportError as e:
     logger.warning("AIModelService not available: %s – Generate RPC will not work", e)
     _ai_service = None
 
+from moderation_input_sanitize import sanitize_for_review
+
 
 class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
     """
@@ -226,11 +228,11 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
 
         The backend still validates confidence/decision ranges and never auto-publishes solely on this response.
         """
-        title = (request.title or "").strip()
-        body = (request.body or "").strip()
-        media_url = (request.media_url or "").strip()
+        title, body, media_url = sanitize_for_review(
+            request.title, request.body, request.media_url or None
+        )
         text = f"{title} {body}".lower()
-        flags = [*_classify_text_signals(text), *_classify_media_signals(media_url)]
+        flags = [*_classify_text_signals(text), *_classify_media_signals(media_url or "")]
         content_type = (request.content_type or "").strip()
         # Document future dedicated image/video models without letting these markers affect risk scoring alone.
         if content_type == "Album":

@@ -23,7 +23,6 @@ try:
     import grpc_testing  # noqa: F401 - availability check
 
     import server
-    from services.ai_model_service import DEFAULT_MODEL_NAME, AIModelService
 
     health_pb2 = server.health_pb2
     health_pb2_grpc = server.health_pb2_grpc
@@ -223,13 +222,43 @@ class TestHealthServiceServicer:
         assert response.decision == "needs_human_review"
         assert "low_quality" in response.flags
 
+    def test_review_content_sanitizes_inputs_before_keyword_classification(self, servicer, mock_context):
+        """Zero-width characters must not break substring-based policy terms."""
+        zw = "\u200b"
+        request = health_pb2.ContentReviewRequest(
+            content_type="Blog",
+            content_id=99,
+            moderation_version=1,
+            face_id=1,
+            title=f"sp{zw}am",
+            body="giveaway content that is long enough for the classifier.",
+            creator_id="user-1",
+        )
+
+        response = servicer.ReviewContent(request, mock_context)
+
+        assert "spam" in response.flags
+
     def test_ai_model_service_defaults_to_qwen3_with_env_override(self, monkeypatch):
         """Test configured model defaults without loading model weights"""
+        pytest.importorskip("torch")
+        from services.ai_model_service import DEFAULT_MODEL_NAME, AIModelService
+
         assert DEFAULT_MODEL_NAME == "Qwen/Qwen3-4B-Instruct-2507"
 
         monkeypatch.setenv("MFAI_AI_MODEL_NAME", "Qwen/Qwen3-0.6B")
         service = AIModelService()
         assert service._model_name == "Qwen/Qwen3-0.6B"
+
+
+class TestModerationInputSanitize:
+    def test_sanitize_strips_bidi_and_zero_width(self):
+        from moderation_input_sanitize import sanitize_for_review
+
+        t, b, m = sanitize_for_review("A\u200bB", "x", " https://a.test/x.jpg\u200b ")
+        assert t == "AB"
+        assert b == "x"
+        assert m == "https://a.test/x.jpg"
 
 
 class TestServerIntegration:
