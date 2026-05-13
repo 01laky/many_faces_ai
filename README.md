@@ -8,6 +8,7 @@ Python gRPC server providing **health checks**, optional **local Qwen text gener
 | --- | -------- |
 | [`README.md`](./README.md) | This file — overview, roadmap, runbook. |
 | [`AI_INTEGRATION.md`](./AI_INTEGRATION.md) | Integration notes for backends and operators (when maintained). |
+| [`docs/grpc-search-worker.md`](./docs/grpc-search-worker.md) | Future gRPC client to the Go search-worker (`many_faces_elastic`); same protos as backend. |
 
 Monorepo guides: [`docs/readmes/ai-grpc-overview.md`](../docs/readmes/ai-grpc-overview.md), [`docs/guides/admin-dashboard-metrics.md`](../docs/guides/admin-dashboard-metrics.md).
 
