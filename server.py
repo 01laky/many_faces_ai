@@ -115,6 +115,8 @@ try:
     if _proto_dir not in sys.path:
         sys.path.insert(0, _proto_dir)
 
+    # noqa: E402 — imports must follow sys.path / os.chdir setup above; Ruff's import-order
+    # rule would move these to the top before generated stubs exist on PYTHONPATH.
     import health_pb2  # noqa: E402
     import health_pb2_grpc as health_pb2_grpc  # noqa: E402
 
