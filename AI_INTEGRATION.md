@@ -1,5 +1,7 @@
 # AI integration — what is in place and how it works
 
+> **Note:** Default **`Generate`** integration today uses **Qwen** via `services/ai_model_service.py` and `README.md` (Model Selection). The DistilGPT-2 walkthrough in §1–§2 below is a **minimal historical sketch** of the transformers stack; prefer the main README for current defaults. **`ReviewContent`** moderation is implemented in `server.py` with tests in `test_server.py`.
+
 ## 1. Open-weight model for Python
 
 - **Model:** **DistilGPT-2** (Hugging Face: `distilgpt2`)
@@ -85,7 +87,11 @@
   grpcurl -plaintext -d '{"prompt": "The weather today is", "max_new_tokens": 20}' localhost:50051 health.HealthService/Generate
   ```
 
-## 5. Summary
+## 5. ReviewContent (user content moderation)
+
+The **`ReviewContent`** RPC is defined in `proto/health.proto` and implemented in `server.py` (`HealthServiceServicer.ReviewContent`). Untrusted title, body, and media URL are normalized first via `moderation_input_sanitize.py`. Tests live in `test_server.py` and `test_moderation_input_sanitize.py`. End-to-end product reference: [`docs/guides/ai-assisted-content-approval.md`](../docs/guides/ai-assisted-content-approval.md) in the **`many_faces_main`** monorepo.
+
+## 6. Summary
 
 | Piece      | Location                          | Role                                     |
 | ---------- | --------------------------------- | ---------------------------------------- |

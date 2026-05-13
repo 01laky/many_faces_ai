@@ -37,12 +37,13 @@ The following areas would make the AI submodule more useful as the platform grow
 
 ## AI-Assisted Content Approval Role
 
-The content approval workflow uses this service as an **advisory** reviewer for regular FE user-created albums, blogs, and reels. The service **never** publishes or deletes rows in PostgreSQL: it only answers `ReviewContent`. **many_faces_backend** (`many_faces_backend/`) enqueues Redis jobs, calls gRPC, validates ranges and policy, retries with backoff, and only `SUPER_ADMIN` (or future explicit auto-policy) may set final `ApprovalStatus`. Full process guide: [`docs/guides/ai-assisted-content-approval.md`](../docs/guides/ai-assisted-content-approval.md).
+The content approval workflow uses this service as an **advisory** reviewer for regular FE user-created albums, blogs, and reels. The service **never** publishes or deletes rows in PostgreSQL: it only answers `ReviewContent`. **many_faces_backend** (`many_faces_backend/`) enqueues Redis jobs, calls gRPC, validates ranges and policy, retries with backoff, and only `SUPER_ADMIN` (or future explicit auto-policy) may set final `ApprovalStatus`. Full process guide: [`docs/guides/ai-assisted-content-approval.md`](../docs/guides/ai-assisted-content-approval.md). Agent prompt for untrusted-content defenses (sanitization, heuristics, tests): [`docs/prompts/moderation-content-prompt-injection-defense-agent-prompt.md`](../docs/prompts/moderation-content-prompt-injection-defense-agent-prompt.md).
 
 Target responsibilities:
 
 - Receive bounded review requests from the backend worker (content type, titles, descriptions, media URLs, moderation version).
 - Classify using deterministic rules plus URL heuristics; attach **boundary** flags when image/video analysis would require a heavier model later.
+- **`ReviewContent` input path:** untrusted title, body, and media URL are normalized in-process via `moderation_input_sanitize.py` (control and bidi stripping, length caps) before keyword classification — mirroring the backend sanitizer for defense in depth.
 - Return a structured decision: `approve`, `reject`, or `needs_human_review`.
 - Include confidence, risk level, flags, internal reason, safe user-facing message, model version, and trace id.
 - Avoid autonomous side effects; all durable state changes stay in the API.
@@ -92,6 +93,9 @@ many_faces_ai/
 │   └── health_pb2_grpc.py  # Generated gRPC service stubs
 ├── scripts/                # Shell helpers (proto generation, Docker dev, lint, verify-ci)
 ├── server.py               # gRPC server implementation
+├── moderation_input_sanitize.py  # Untrusted-field normalization before ReviewContent
+├── test_server.py          # gRPC servicer tests (pytest)
+├── test_moderation_input_sanitize.py  # Unit tests for sanitizer
 ├── services/               # AI model service
 │   ├── __init__.py
 │   └── ai_model_service.py # Qwen wrapper (generate)
@@ -101,6 +105,8 @@ many_faces_ai/
 ```
 
 ## Running
+
+Local and Docker flows are covered below under **Model Selection** and **Running in Docker Container**.
 
 ## Model Selection
 
@@ -404,3 +410,12 @@ If you see `ModuleNotFoundError` for proto files:
 - **Proto Generation**: Proto files are generated during Docker build, not locally
 - **Network Access**: Service is accessible from other containers on the same Docker network
 - **Production**: For production, consider adding authentication, TLS, and more comprehensive health checks
+
+## Monorepo documentation
+
+This repository is a **git submodule** of [`many_faces_main`](https://github.com/01laky/many_faces_main). Central guides and the documentation hub:
+
+- [docs/README.md](https://github.com/01laky/many_faces_main/blob/main/docs/README.md)  
+- [docs/guides/ai-assisted-content-approval.md](https://github.com/01laky/many_faces_main/blob/main/docs/guides/ai-assisted-content-approval.md) — end-to-end moderation pipeline  
+- [docs/guides/development.md](https://github.com/01laky/many_faces_main/blob/main/docs/guides/development.md) — `scripts/lint-all.sh`, CI expectations  
+- [docs/guides/git-submodules.md](https://github.com/01laky/many_faces_main/blob/main/docs/guides/git-submodules.md) — submodule workflow  
