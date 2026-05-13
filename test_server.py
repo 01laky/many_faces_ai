@@ -263,6 +263,122 @@ class TestModerationInputSanitize:
         assert m == "https://a.test/x.jpg"
 
 
+class TestGenerateWithStatsContext:
+    """Edge cases for Generate + stats_context_json (operator admin chat)."""
+
+    @pytest.fixture
+    def servicer(self):
+        return HealthServiceServicer()
+
+    @pytest.fixture
+    def mock_context(self):
+        context = MagicMock()
+        context.code = lambda: None
+        context.details = lambda: None
+        return context
+
+    def test_generate_returns_error_when_ai_service_unavailable(self, servicer, mock_context, monkeypatch):
+        monkeypatch.setattr(server, "_ai_service", None)
+        req = health_pb2.GenerateRequest(prompt="User: x\nAI:", max_new_tokens=10)
+        req.stats_context_json = '{"usersCount":1}'
+        resp = servicer.Generate(req, mock_context)
+        assert resp.text == ""
+        assert "AIModelService not available" in resp.error
+
+    def test_generate_prepends_stats_context_json_before_prompt(self, servicer, mock_context, monkeypatch):
+        mock_ai = MagicMock()
+        mock_ai.generate = MagicMock(return_value="ok")
+        monkeypatch.setattr(server, "_ai_service", mock_ai)
+        req = health_pb2.GenerateRequest(prompt="User: hi\nAI:", max_new_tokens=12)
+        req.stats_context_json = '{"usersCount":3}'
+        resp = servicer.Generate(req, mock_context)
+        assert resp.error == ""
+        assert resp.text == "ok"
+        mock_ai.generate.assert_called_once()
+        full_prompt = mock_ai.generate.call_args[0][0]
+        assert "Read-only aggregate platform statistics" in full_prompt
+        assert '"usersCount":3' in full_prompt
+        assert full_prompt.endswith("User: hi\nAI:")
+
+    def test_generate_stats_context_whitespace_only_behaves_like_absent(self, servicer, mock_context, monkeypatch):
+        mock_ai = MagicMock()
+        mock_ai.generate = MagicMock(return_value="y")
+        monkeypatch.setattr(server, "_ai_service", mock_ai)
+        req = health_pb2.GenerateRequest(prompt="User: z\nAI:", max_new_tokens=10)
+        req.stats_context_json = "   \n\t  "
+        resp = servicer.Generate(req, mock_context)
+        assert resp.error == ""
+        assert mock_ai.generate.call_args[0][0] == "User: z\nAI:"
+
+
+class TestFetchPublicStats:
+    @pytest.fixture
+    def servicer(self):
+        return HealthServiceServicer()
+
+    @pytest.fixture
+    def mock_context(self):
+        return MagicMock()
+
+    def test_rejects_non_http_scheme(self, servicer, mock_context):
+        req = health_pb2.FetchPublicStatsRequest(absolute_url="ftp://example.com/x")
+        resp = servicer.FetchPublicStats(req, mock_context)
+        assert resp.json_body == ""
+        assert "http" in resp.error.lower()
+
+    def test_rejects_javascript_url(self, servicer, mock_context):
+        req = health_pb2.FetchPublicStatsRequest(absolute_url="javascript:alert(1)")
+        resp = servicer.FetchPublicStats(req, mock_context)
+        assert resp.json_body == ""
+        assert resp.error
+
+
+class TestOperatorStatsChat:
+    @pytest.fixture
+    def servicer(self):
+        return HealthServiceServicer()
+
+    @pytest.fixture
+    def mock_context(self):
+        return MagicMock()
+
+    def test_requires_user_message(self, servicer, mock_context):
+        req = health_pb2.OperatorStatsChatRequest(
+            user_message="   ",
+            history_text="",
+            fetch_live_public_snapshot=False,
+            public_stats_absolute_url="",
+            max_new_tokens=50,
+        )
+        resp = servicer.OperatorStatsChat(req, mock_context)
+        assert resp.text == ""
+        assert "user_message" in resp.error.lower()
+
+    def test_live_mode_requires_public_stats_url(self, servicer, mock_context):
+        req = health_pb2.OperatorStatsChatRequest(
+            user_message="Summarize",
+            history_text="",
+            fetch_live_public_snapshot=True,
+            public_stats_absolute_url="",
+            max_new_tokens=50,
+        )
+        resp = servicer.OperatorStatsChat(req, mock_context)
+        assert resp.text == ""
+        assert "public_stats_absolute_url" in resp.error.lower()
+
+    def test_offline_live_fetch_returns_error_not_crash(self, servicer, mock_context):
+        req = health_pb2.OperatorStatsChatRequest(
+            user_message="Hello",
+            history_text="",
+            fetch_live_public_snapshot=True,
+            public_stats_absolute_url="http://127.0.0.1:9/stats-unreachable",
+            max_new_tokens=50,
+        )
+        resp = servicer.OperatorStatsChat(req, mock_context)
+        assert resp.text == ""
+        assert resp.error
+
+
 class TestServerIntegration:
     """Integration tests for gRPC server"""
 

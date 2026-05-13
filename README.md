@@ -1,12 +1,12 @@
 # Many Faces AI service - gRPC Server
 
-Python gRPC server providing **health checks**, optional **local Qwen text generation**, and structured **`ReviewContent`** responses for the user-content moderation pipeline used by **many_faces_backend** (`many_faces_backend/`).
+Python gRPC server providing **health checks**, optional **local Qwen text generation** (**`Generate`** with optional **`stats_context_json`**), **public JSON fetch** (**`FetchPublicStats`**), **operator stats chat** (**`OperatorStatsChat`**), and structured **`ReviewContent`** responses for the user-content moderation pipeline used by **many_faces_backend** (`many_faces_backend/`).
 
 ## Overview
 
-The Many Faces AI service (**many_faces_ai**; monorepo path `many_faces_ai/`) is a Python-based gRPC server. The backend API (**many_faces_backend** / `many_faces_backend/`) connects on startup for **health verification**, optional **Qwen-backed `Generate`**, and the **`ReviewContent`** contract used by the user-content moderation worker.
+The Many Faces AI service (**many_faces_ai**; monorepo path `many_faces_ai/`) is a Python-based gRPC server. The backend API (**many_faces_backend** / `many_faces_backend/`) connects on startup for **health verification**, optional **Qwen-backed `Generate`** (with optional **`stats_context_json`** for operator admin chat), **`FetchPublicStats`** / **`OperatorStatsChat`** when **live** public-statistics mode is enabled, and the **`ReviewContent`** contract used by the user-content moderation worker.
 
-In the broader Many Faces AI architecture, this submodule is the AI workspace for application-aware intelligence. **Implemented today:** gRPC `Health`, `Generate` (local Qwen), and `ReviewContent` — a deterministic classifier over text and media URL metadata that returns approve / reject / needs-human-review with confidence, risk, flags, reasons, and optional **`image_analysis_boundary`** / **`video_analysis_boundary`** policy flags (placeholders for heavier CV models; this reference classifier does not treat them as sole auto-reject triggers). The longer-term direction is richer context snapshots, admin reports, and chat-security RPCs.
+In the broader Many Faces AI architecture, this submodule is the AI workspace for application-aware intelligence. **Implemented today:** gRPC **`Health`**, **`Generate`** (local Qwen + optional aggregate JSON prefix), **`FetchPublicStats`** (HTTP GET helper), **`OperatorStatsChat`** (optional live fetch + **`Generate`**), and **`ReviewContent`** — a deterministic classifier over text and media URL metadata that returns approve / reject / needs-human-review with confidence, risk, flags, reasons, and optional **`image_analysis_boundary`** / **`video_analysis_boundary`** policy flags (placeholders for heavier CV models; this reference classifier does not treat them as sole auto-reject triggers). The longer-term direction is richer context snapshots, admin reports, and chat-security RPCs.
 
 The goal is for the AI service to understand the application's structure instead of acting as a generic text generator. Future capabilities can use face configuration, page layouts, grid components, roles, content modules, and backend metadata as context for more useful responses. That makes the service a natural place for application-context summaries, admin-facing insights, feature recommendations, and guided diagnostics across the MFAI platform.
 
@@ -57,14 +57,30 @@ Safety rule:
 
 This keeps the AI service useful without making it an uncontrolled publisher.
 
+## Operator statistics RPCs (admin assistant)
+
+The **many_faces_backend** `ChatHub` may call these RPCs when a platform operator uses **admin AI chat** with **inline** or **live** public-statistics mode (see monorepo [`docs/guides/admin-dashboard-metrics.md`](../docs/guides/admin-dashboard-metrics.md)):
+
+| RPC | Role |
+| --- | ---- |
+| **`Generate`** | Same as chat completion; if **`stats_context_json`** is set, the servicer prepends a short English banner + JSON + separator **before** the conversational prompt. |
+| **`FetchPublicStats`** | **`GET`** the **`absolute_url`** (must be `http://` or `https://`). For **localhost / 127.0.0.1 / ::1** over HTTPS, TLS verification is relaxed for dev self-signed certs only. |
+| **`OperatorStatsChat`** | If **`fetch_live_public_snapshot`**, calls **`FetchPublicStats`** first; builds **`GenerateRequest`** with optional **`stats_context_json`** and a final **`User:` / `AI:`** tail from **`user_message`** and **`history_text`**. |
+
+**Proto:** `proto/health.proto` (regenerate with `scripts/generate_proto.sh`; generated `*_pb2.py` files are gitignored — use a **`.venv`** with **`grpcio-tools`** when `python3 -m grpc_tools.protoc` is not available on the host).
+
+**Tests:** `test_server.py` covers **`Generate`** + stats context (mocked **`AIModelService`**), invalid **`FetchPublicStats`** URLs, and **`OperatorStatsChat`** validation / unreachable live URL behaviour.
+
 ## Features
 
 - **gRPC Server**
   - High-performance RPC communication
   - Protocol Buffers for data serialization
   - Health check endpoint
-  - **AI text generation** - `Generate` RPC with local Qwen (no API key)
-  - **Content review** - `ReviewContent` RPC for structured moderation recommendations
+  - **AI text generation** — **`Generate`** RPC with local Qwen; optional **`stats_context_json`** prepends read-only aggregate JSON (admin operator chat **inline** mode).
+  - **Public stats fetch** — **`FetchPublicStats`** RPC: server-side HTTP GET of a caller-supplied absolute URL (used by **`OperatorStatsChat`** **live** mode; intended for **`/public/api/Stats/public`** on the API host).
+  - **Operator stats chat** — **`OperatorStatsChat`** RPC: optionally fetch JSON, then **`Generate`** with composed **`User:` / `AI:`** prompt tail.
+  - **Content review** — **`ReviewContent`** RPC for structured moderation recommendations
 
 - **Docker Support**
   - Containerized development environment
