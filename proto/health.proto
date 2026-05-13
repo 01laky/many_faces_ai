@@ -1,5 +1,5 @@
-// health.proto - gRPC service definition for health check
-// This proto file defines the health check service used to verify AI service availability
+// health.proto - gRPC service definition for health check and AI generation
+// Used by BeDemo.Api to call the Python AI service (many_faces_ai)
 
 syntax = "proto3";
 
@@ -7,47 +7,45 @@ package health;
 
 // Health service provides health check and AI generation functionality
 service HealthService {
-  // HealthCheck checks if the service is running and ready
-  // Returns success if the service is operational
   rpc HealthCheck (HealthCheckRequest) returns (HealthCheckResponse);
-
-  // Generate completes the given prompt using the local AI model (DistilGPT-2)
-  // Returns the generated text (prompt + continuation)
   rpc Generate (GenerateRequest) returns (GenerateResponse);
-
-  // ReviewContent returns a structured moderation recommendation for user-created content.
   rpc ReviewContent (ContentReviewRequest) returns (ContentReviewResponse);
+  rpc FetchPublicStats (FetchPublicStatsRequest) returns (FetchPublicStatsResponse);
+  rpc OperatorStatsChat (OperatorStatsChatRequest) returns (GenerateResponse);
 }
 
-// Request message for health check
-message HealthCheckRequest {
-  // Optional: can include additional check parameters in the future
-}
-
-// Response message for health check
+message HealthCheckRequest {}
 message HealthCheckResponse {
-  // Status of the health check
-  // "success" indicates the service is running and ready
   string status = 1;
-  
-  // Optional: additional status message
   string message = 2;
 }
 
-// Request message for AI text generation
 message GenerateRequest {
-  // Input text (prompt) from which the model will generate continuation
   string prompt = 1;
-  // Maximum number of new tokens to generate (optional, server default used if 0)
   int32 max_new_tokens = 2;
+  optional string stats_context_json = 3;
 }
 
-// Response message for AI text generation
 message GenerateResponse {
-  // Generated text (prompt + model continuation), or empty on error
   string text = 1;
-  // Optional error message if generation failed
   string error = 2;
+}
+
+message FetchPublicStatsRequest {
+  string absolute_url = 1;
+}
+
+message FetchPublicStatsResponse {
+  string json_body = 1;
+  string error = 2;
+}
+
+message OperatorStatsChatRequest {
+  string user_message = 1;
+  string history_text = 2;
+  bool fetch_live_public_snapshot = 3;
+  string public_stats_absolute_url = 4;
+  int32 max_new_tokens = 5;
 }
 
 message ContentReviewRequest {

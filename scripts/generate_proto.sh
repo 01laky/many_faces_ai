@@ -5,8 +5,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-echo "Generating gRPC Python code from proto/health.proto..."
-python3 -m grpc_tools.protoc \
+PY=python3
+if [[ -x "$ROOT/.venv/bin/python" ]]; then
+  PY="$ROOT/.venv/bin/python"
+fi
+
+echo "Generating gRPC Python code from proto/health.proto (using $PY)..."
+"$PY" -m grpc_tools.protoc \
   -I proto \
   --python_out=proto \
   --grpc_python_out=proto \

@@ -199,9 +199,19 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
         prompt = (request.prompt or "").strip()
         if not prompt:
             return health_pb2.GenerateResponse(text="", error="prompt is required")
+        stats_block = ""
+        if request.HasField("stats_context_json"):
+            js = (request.stats_context_json or "").strip()
+            if js:
+                stats_block = (
+                    "[Read-only aggregate platform statistics — JSON only, no personal user data]\n"
+                    + js
+                    + "\n\n---\n\n"
+                )
+        full_prompt = stats_block + prompt
         max_new_tokens = request.max_new_tokens if request.max_new_tokens > 0 else 50
         try:
-            text = _ai_service.generate(prompt, max_new_tokens=max_new_tokens)
+            text = _ai_service.generate(full_prompt, max_new_tokens=max_new_tokens)
             return health_pb2.GenerateResponse(text=text)
         except RuntimeError as e:
             if "MODEL_LOADING" in str(e):
@@ -211,6 +221,69 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
                 )
             logger.exception("Generate failed: %s", e)
             return health_pb2.GenerateResponse(text="", error=str(e))
+
+    def FetchPublicStats(self, request, context):
+        """HTTP GET of a configured absolute URL (intended for BeDemo public stats JSON)."""
+        url = (request.absolute_url or "").strip()
+        if not url.startswith("http://") and not url.startswith("https://"):
+            return health_pb2.FetchPublicStatsResponse(error="absolute_url must be http(s)")
+        try:
+            import ssl
+            import urllib.error
+            import urllib.request
+            from urllib.parse import urlparse
+
+            host = (urlparse(url).hostname or "").lower()
+            use_insecure_tls = host in ("localhost", "127.0.0.1", "::1")
+
+            req = urllib.request.Request(url, headers={"User-Agent": "many-faces-ai-fetch-public-stats"})
+            open_kw: dict = {"timeout": 45}
+            if use_insecure_tls:
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                open_kw["context"] = ctx
+
+            with urllib.request.urlopen(req, **open_kw) as resp:
+                body = resp.read().decode("utf-8", errors="replace")
+            return health_pb2.FetchPublicStatsResponse(json_body=body)
+        except urllib.error.HTTPError as e:
+            return health_pb2.FetchPublicStatsResponse(error=f"HTTP {e.code}: {e.reason}")
+        except Exception as e:
+            logger.warning("FetchPublicStats failed: %s", e)
+            return health_pb2.FetchPublicStatsResponse(error=str(e))
+
+    def OperatorStatsChat(self, request, context):
+        """Optional path: fetch live JSON then run the same Generate path with a composed prompt."""
+        stats_json = ""
+        if request.fetch_live_public_snapshot:
+            u = (request.public_stats_absolute_url or "").strip()
+            if not u:
+                return health_pb2.GenerateResponse(text="", error="public_stats_absolute_url is required for live mode")
+            fr = self.FetchPublicStats(health_pb2.FetchPublicStatsRequest(absolute_url=u), context)
+            if fr.error:
+                return health_pb2.GenerateResponse(text="", error=fr.error)
+            stats_json = (fr.json_body or "").strip()
+
+        user_msg = (request.user_message or "").strip()
+        if not user_msg:
+            return health_pb2.GenerateResponse(text="", error="user_message is required")
+
+        hist = request.history_text or ""
+        max_tok = request.max_new_tokens if request.max_new_tokens > 0 else 150
+        parts: list[str] = []
+        if hist.strip():
+            parts.append(hist.strip())
+            if not hist.endswith("\n"):
+                parts.append("\n")
+        parts.append("User: ")
+        parts.append(user_msg)
+        parts.append("\nAI:")
+        composed = "".join(parts)
+        inner = health_pb2.GenerateRequest(prompt=composed, max_new_tokens=max_tok)
+        if stats_json:
+            inner.stats_context_json = stats_json
+        return self.Generate(inner, context)
 
     def ReviewContent(self, request, context):
         """
