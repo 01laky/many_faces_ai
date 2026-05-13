@@ -20,6 +20,10 @@ Today this defines `SearchService.Ping` for reachability checks. Future RPCs (`S
 
 The worker may require the `x-search-worker-token` metadata header when `SEARCH_WORKER_EXPECTED_TOKEN` is set. **many_faces_ai** must send its own service identity secret (distinct from end-user JWTs) when calling the worker — align with `many_faces_elastic` README and monorepo security docs.
 
+## Transport (TLS / mTLS)
+
+When the worker is started with `SEARCH_WORKER_GRPC_TLS_CERT_FILE` and `SEARCH_WORKER_GRPC_TLS_KEY_FILE`, use **TLS** from the Python client (channel credentials over `https://` or equivalent). For **mTLS**, also supply a client certificate trusted by the CA in `SEARCH_WORKER_GRPC_MTLS_CLIENT_CA_FILE`. Operator reference: monorepo [`docs/guides/elasticsearch-grpc-tls-mtls.md`](../../docs/guides/elasticsearch-grpc-tls-mtls.md).
+
 ## Non-goals
 
 - Duplicating business rules or face ACL inside the worker (authorization stays in **many_faces_backend** for user-driven flows).
