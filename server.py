@@ -236,7 +236,9 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
             host = (urlparse(url).hostname or "").lower()
             use_insecure_tls = host in ("localhost", "127.0.0.1", "::1")
 
-            req = urllib.request.Request(url, headers={"User-Agent": "many-faces-ai-fetch-public-stats"})
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "many-faces-ai-fetch-public-stats"}
+            )
             open_kw: dict = {"timeout": 45}
             if use_insecure_tls:
                 ctx = ssl.create_default_context()
@@ -259,7 +261,9 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
         if request.fetch_live_public_snapshot:
             u = (request.public_stats_absolute_url or "").strip()
             if not u:
-                return health_pb2.GenerateResponse(text="", error="public_stats_absolute_url is required for live mode")
+                return health_pb2.GenerateResponse(
+                    text="", error="public_stats_absolute_url is required for live mode"
+                )
             fr = self.FetchPublicStats(health_pb2.FetchPublicStatsRequest(absolute_url=u), context)
             if fr.error:
                 return health_pb2.GenerateResponse(text="", error=fr.error)

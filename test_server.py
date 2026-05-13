@@ -277,7 +277,9 @@ class TestGenerateWithStatsContext:
         context.details = lambda: None
         return context
 
-    def test_generate_returns_error_when_ai_service_unavailable(self, servicer, mock_context, monkeypatch):
+    def test_generate_returns_error_when_ai_service_unavailable(
+        self, servicer, mock_context, monkeypatch
+    ):
         monkeypatch.setattr(server, "_ai_service", None)
         req = health_pb2.GenerateRequest(prompt="User: x\nAI:", max_new_tokens=10)
         req.stats_context_json = '{"usersCount":1}'
@@ -285,7 +287,9 @@ class TestGenerateWithStatsContext:
         assert resp.text == ""
         assert "AIModelService not available" in resp.error
 
-    def test_generate_prepends_stats_context_json_before_prompt(self, servicer, mock_context, monkeypatch):
+    def test_generate_prepends_stats_context_json_before_prompt(
+        self, servicer, mock_context, monkeypatch
+    ):
         mock_ai = MagicMock()
         mock_ai.generate = MagicMock(return_value="ok")
         monkeypatch.setattr(server, "_ai_service", mock_ai)
@@ -300,7 +304,9 @@ class TestGenerateWithStatsContext:
         assert '"usersCount":3' in full_prompt
         assert full_prompt.endswith("User: hi\nAI:")
 
-    def test_generate_stats_context_whitespace_only_behaves_like_absent(self, servicer, mock_context, monkeypatch):
+    def test_generate_stats_context_whitespace_only_behaves_like_absent(
+        self, servicer, mock_context, monkeypatch
+    ):
         mock_ai = MagicMock()
         mock_ai.generate = MagicMock(return_value="y")
         monkeypatch.setattr(server, "_ai_service", mock_ai)

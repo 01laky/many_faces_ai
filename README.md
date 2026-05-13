@@ -2,6 +2,15 @@
 
 Python gRPC server providing **health checks**, optional **local Qwen text generation** (**`Generate`** with optional **`stats_context_json`**), **public JSON fetch** (**`FetchPublicStats`**), **operator stats chat** (**`OperatorStatsChat`**), and structured **`ReviewContent`** responses for the user-content moderation pipeline used by **many_faces_backend** (`many_faces_backend/`).
 
+## Documentation in this repo
+
+| Doc | Purpose |
+| --- | -------- |
+| [`README.md`](./README.md) | This file — overview, roadmap, runbook. |
+| [`AI_INTEGRATION.md`](./AI_INTEGRATION.md) | Integration notes for backends and operators (when maintained). |
+
+Monorepo guides: [`docs/readmes/ai-grpc-overview.md`](../docs/readmes/ai-grpc-overview.md), [`docs/guides/admin-dashboard-metrics.md`](../docs/guides/admin-dashboard-metrics.md).
+
 ## Overview
 
 The Many Faces AI service (**many_faces_ai**; monorepo path `many_faces_ai/`) is a Python-based gRPC server. The backend API (**many_faces_backend** / `many_faces_backend/`) connects on startup for **health verification**, optional **Qwen-backed `Generate`** (with optional **`stats_context_json`** for operator admin chat), **`FetchPublicStats`** / **`OperatorStatsChat`** when **live** public-statistics mode is enabled, and the **`ReviewContent`** contract used by the user-content moderation worker.
