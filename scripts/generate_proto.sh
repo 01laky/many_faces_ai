@@ -10,9 +10,9 @@ if [[ -x "$ROOT/.venv/bin/python" ]]; then
   PY="$ROOT/.venv/bin/python"
 fi
 
-PROTO_ROOT="${ROOT}/../many_faces_proto/proto"
+PROTO_ROOT="${ROOT}/many_faces_proto/proto"
 if [[ ! -d "$PROTO_ROOT" ]]; then
-  echo "error: many_faces_proto not found at ${PROTO_ROOT} (clone monorepo with --recursive or clone many_faces_proto beside many_faces_ai)." >&2
+  echo "error: many_faces_proto not found at ${PROTO_ROOT}. Run: git submodule update --init --recursive (nested Strategy B)." >&2
   exit 1
 fi
 

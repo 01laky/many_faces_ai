@@ -39,9 +39,9 @@ echo "🔍 many_faces_ai verify-ci (python: $PY)..."
 # gRPC tests import `server.py`, which needs the same ML stack as local dev (CPU wheels).
 "$PIP" install -q numpy accelerate "transformers>=4.36" torch --extra-index-url https://download.pytorch.org/whl/cpu
 
-PROTO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/../many_faces_proto/proto"
+PROTO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/many_faces_proto/proto"
 if [[ ! -f "${PROTO_ROOT}/health.proto" ]]; then
-  echo "verify-ci: many_faces_proto missing at ${PROTO_ROOT} — run from monorepo with submodules." >&2
+  echo "verify-ci: many_faces_proto missing at ${PROTO_ROOT} — run: git submodule update --init --recursive" >&2
   exit 1
 fi
 "$PYEXE" -m grpc_tools.protoc -I "$PROTO_ROOT" --python_out=proto --grpc_python_out=proto health.proto

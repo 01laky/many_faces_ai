@@ -12,9 +12,8 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Canonical contract from many_faces_proto (shallow clone at build time)
-RUN apt-get update -qq && apt-get install -y -qq git >/dev/null \
-    && git clone --depth 1 https://github.com/01laky/many_faces_proto.git /mfproto
+# Nested many_faces_proto submodule (Strategy B) — copy into image for protoc
+COPY many_faces_proto /mfproto
 
 # Generate Python gRPC code into proto/ (matches server.py import layout)
 RUN mkdir -p proto \

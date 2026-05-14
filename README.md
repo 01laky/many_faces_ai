@@ -77,7 +77,7 @@ The **many_faces_backend** `ChatHub` may call these RPCs when a platform operato
 | **`FetchPublicStats`** | **`GET`** the **`absolute_url`** (must be `http://` or `https://`). For **localhost / 127.0.0.1 / ::1** over HTTPS, TLS verification is relaxed for dev self-signed certs only. |
 | **`OperatorStatsChat`** | If **`fetch_live_public_snapshot`**, calls **`FetchPublicStats`** first; builds **`GenerateRequest`** with optional **`stats_context_json`** and a final **`User:` / `AI:`** tail from **`user_message`** and **`history_text`**. |
 
-**Proto:** canonical **`health.proto`** lives in the **`many_faces_proto`** submodule (`../many_faces_proto/proto/health.proto` from this repo). Regenerate with **`scripts/generate_proto.sh`**; generated `*_pb2.py` files are gitignored — use a **`.venv`** with **`grpcio-tools`** when `python3 -m grpc_tools.protoc` is not available on the host.
+**Proto:** canonical **`health.proto`** lives in the nested **`many_faces_proto`** submodule at **`many_faces_ai/many_faces_proto/proto/health.proto`**. Regenerate with **`scripts/generate_proto.sh`**; generated `*_pb2.py` files are gitignored — use a **`.venv`** with **`grpcio-tools`** when `python3 -m grpc_tools.protoc` is not available on the host.
 
 **Tests:** `test_server.py` covers **`Generate`** + stats context (mocked **`AIModelService`**), invalid **`FetchPublicStats`** URLs, and **`OperatorStatsChat`** validation / unreachable live URL behaviour.
 

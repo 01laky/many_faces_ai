@@ -11,9 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Clone many_faces_proto (health contract)
-        run: git clone --depth 1 https://github.com/01laky/many_faces_proto.git "${{ github.workspace }}/../many_faces_proto"
+        with:
+          submodules: recursive
 
       - uses: actions/setup-python@v5
         with:
@@ -27,7 +26,7 @@ jobs:
           python -m pip install ruff pytest grpcio==1.68.1 grpcio-tools==1.68.1 protobuf==5.28.3 grpcio-testing==1.68.1
 
       - name: Generate protobuf / gRPC stubs
-        run: python -m grpc_tools.protoc -I ../many_faces_proto/proto --python_out=proto --grpc_python_out=proto health.proto
+        run: python -m grpc_tools.protoc -I many_faces_proto/proto --python_out=proto --grpc_python_out=proto health.proto
 
       - name: Ruff lint + format check
         run: |
