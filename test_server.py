@@ -316,6 +316,27 @@ class TestGenerateWithStatsContext:
         assert resp.error == ""
         assert mock_ai.generate.call_args[0][0] == "User: z\nAI:"
 
+    def test_generate_rejects_empty_prompt(self, servicer, mock_context, monkeypatch):
+        mock_ai = MagicMock()
+        mock_ai.generate = MagicMock(return_value="should-not-run")
+        monkeypatch.setattr(server, "_ai_service", mock_ai)
+        req = health_pb2.GenerateRequest(prompt="", max_new_tokens=10)
+        resp = servicer.Generate(req, mock_context)
+        assert resp.text == ""
+        assert "prompt is required" in resp.error
+        mock_ai.generate.assert_not_called()
+
+    def test_generate_rejects_whitespace_only_prompt(
+        self, servicer, mock_context, monkeypatch
+    ):
+        mock_ai = MagicMock()
+        monkeypatch.setattr(server, "_ai_service", mock_ai)
+        req = health_pb2.GenerateRequest(prompt="  \n\t  ", max_new_tokens=10)
+        resp = servicer.Generate(req, mock_context)
+        assert resp.text == ""
+        assert "prompt is required" in resp.error
+        mock_ai.generate.assert_not_called()
+
 
 class TestFetchPublicStats:
     @pytest.fixture
@@ -337,6 +358,13 @@ class TestFetchPublicStats:
         resp = servicer.FetchPublicStats(req, mock_context)
         assert resp.json_body == ""
         assert resp.error
+
+    def test_rejects_empty_and_whitespace_url(self, servicer, mock_context):
+        for url in ("", "   ", "\t"):
+            req = health_pb2.FetchPublicStatsRequest(absolute_url=url)
+            resp = servicer.FetchPublicStats(req, mock_context)
+            assert resp.json_body == ""
+            assert "http" in resp.error.lower()
 
 
 class TestOperatorStatsChat:
