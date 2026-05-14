@@ -25,7 +25,7 @@
 
 ### 2.2 gRPC integration
 
-- **Proto:** `proto/health.proto` defines:
+- **Proto:** canonical **`many_faces_proto/proto/health.proto`** defines:
   - **RPC:** `Generate(GenerateRequest) returns (GenerateResponse)`
   - **GenerateRequest:** `prompt` (string), `max_new_tokens` (int32, optional)
   - **GenerateResponse:** `text` (generated text), `error` (optional failure message)
@@ -41,7 +41,7 @@
 
 - **requirements.txt:** `transformers`, `torch`, `accelerate`
 - **Dockerfile.dev:** copies `services/` into the image
-- **Proto:** after editing `health.proto`, regenerate Python stubs (Docker build does this)
+- **Proto:** after editing **`many_faces_proto`** `health.proto`, regenerate Python stubs (`./scripts/generate_proto.sh`) and bump the **`many_faces_proto`** submodule where this repo is consumed.
 
 ## 3. Request flow
 
@@ -89,7 +89,7 @@
 
 ## 5. ReviewContent (user content moderation)
 
-The **`ReviewContent`** RPC is defined in `proto/health.proto` and implemented in `server.py` (`HealthServiceServicer.ReviewContent`). Untrusted title, body, and media URL are normalized first via `moderation_input_sanitize.py`. Tests live in `test_server.py` and `test_moderation_input_sanitize.py`. End-to-end product reference: [`docs/guides/ai-assisted-content-approval.md`](../docs/guides/ai-assisted-content-approval.md) in the **`many_faces_main`** monorepo.
+The **`ReviewContent`** RPC is defined in **`many_faces_proto/proto/health.proto`** and implemented in `server.py` (`HealthServiceServicer.ReviewContent`). Untrusted title, body, and media URL are normalized first via `moderation_input_sanitize.py`. Tests live in `test_server.py` and `test_moderation_input_sanitize.py`. End-to-end product reference: [`docs/guides/ai-assisted-content-approval.md`](../docs/guides/ai-assisted-content-approval.md) in the **`many_faces_main`** monorepo.
 
 ## 6. Summary
 
@@ -97,5 +97,5 @@ The **`ReviewContent`** RPC is defined in `proto/health.proto` and implemented i
 | ---------- | --------------------------------- | ---------------------------------------- |
 | Open model | DistilGPT-2 (Hugging Face)        | Local text generation without an API key |
 | Service    | `services/ai_model_service.py`    | Load weights, `generate()`               |
-| gRPC       | `proto/health.proto`, `server.py` | `Generate` RPC and handler               |
+| gRPC       | `many_faces_proto` `health.proto`, `server.py` | `Generate` RPC and handler               |
 | Deps       | `requirements.txt`, Dockerfile    | `transformers`, `torch`, `accelerate`    |

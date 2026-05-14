@@ -77,7 +77,7 @@ The **many_faces_backend** `ChatHub` may call these RPCs when a platform operato
 | **`FetchPublicStats`** | **`GET`** the **`absolute_url`** (must be `http://` or `https://`). For **localhost / 127.0.0.1 / ::1** over HTTPS, TLS verification is relaxed for dev self-signed certs only. |
 | **`OperatorStatsChat`** | If **`fetch_live_public_snapshot`**, calls **`FetchPublicStats`** first; builds **`GenerateRequest`** with optional **`stats_context_json`** and a final **`User:` / `AI:`** tail from **`user_message`** and **`history_text`**. |
 
-**Proto:** `proto/health.proto` (regenerate with `scripts/generate_proto.sh`; generated `*_pb2.py` files are gitignored — use a **`.venv`** with **`grpcio-tools`** when `python3 -m grpc_tools.protoc` is not available on the host).
+**Proto:** canonical **`health.proto`** lives in the **`many_faces_proto`** submodule (`../many_faces_proto/proto/health.proto` from this repo). Regenerate with **`scripts/generate_proto.sh`**; generated `*_pb2.py` files are gitignored — use a **`.venv`** with **`grpcio-tools`** when `python3 -m grpc_tools.protoc` is not available on the host.
 
 **Tests:** `test_server.py` covers **`Generate`** + stats context (mocked **`AIModelService`**), invalid **`FetchPublicStats`** URLs, and **`OperatorStatsChat`** validation / unreachable live URL behaviour.
 
@@ -113,9 +113,8 @@ The **many_faces_backend** `ChatHub` may call these RPCs when a platform operato
 
 ```
 many_faces_ai/
-├── proto/                  # Protocol buffer definitions
-│   ├── health.proto        # Health check service definition
-│   ├── health_pb2.py       # Generated Python message classes
+├── proto/                  # Generated Python stubs (from many_faces_proto)
+│   ├── health_pb2.py       # Generated message classes
 │   └── health_pb2_grpc.py  # Generated gRPC service stubs
 ├── scripts/                # Shell helpers (proto generation, Docker dev, lint, verify-ci)
 ├── server.py               # gRPC server implementation
@@ -300,15 +299,9 @@ The service runs on the `many_faces_main_dev-network` Docker network, allowing o
 
 ### Generating gRPC Code
 
-Proto files are automatically generated during Docker image build. To regenerate manually:
+**In Docker** (during build): `Dockerfile.dev` clones **`many_faces_proto`** and runs `grpc_tools.protoc` against **`health.proto`**.
 
-**In Docker** (during build):
-
-```bash
-python -m grpc_tools.protoc -I./proto --python_out=./proto --grpc_python_out=./proto ./proto/health.proto
-```
-
-**Locally**:
+**Locally** (monorepo with submodules):
 
 ```bash
 ./scripts/generate_proto.sh
@@ -321,7 +314,7 @@ This generates:
 
 ### Adding New RPC Methods
 
-1. **Update `proto/health.proto`**:
+1. **Update `many_faces_proto/proto/health.proto`** (open a PR in **`many_faces_proto`**, bump the submodule pin in **`many_faces_main`**):
 
    ```protobuf
    service HealthService {
@@ -369,7 +362,7 @@ docker logs be-demo-dev | grep -i "ai service"
 
 2. **Start Many Faces AI service**: Run `./scripts/start-dev.sh` or use monorepo `./scripts/start-all-dev.sh` to start all services
 
-3. **Make code changes**: Edit `server.py` or `proto/health.proto`
+3. **Make code changes**: Edit `server.py` or the shared **`health.proto`** in **`many_faces_proto`**
 
 4. **Test changes**:
    - Check service is responding: `docker logs ai-demo-dev`

@@ -14,7 +14,7 @@ Today this defines `SearchService.Ping` for reachability checks. Future RPCs (`S
 
 1. Regenerate **Go** stubs under `many_faces_elastic/gen/…` for the worker.
 2. Regenerate **C#** stubs via `Grpc.Tools` in `many_faces_backend` (already wired to the shared proto path).
-3. Regenerate **Python** stubs with `grpcio-tools` (same pattern as `proto/health.proto` and `scripts/generate_proto.sh` in this repo — add a second `.proto` include path or symlink policy and document it next to the shell script).
+3. Regenerate **Python** stubs with `grpcio-tools` (same pattern as **`many_faces_proto/proto/health.proto`** and `scripts/generate_proto.sh` in this repo — add a second `.proto` include path or symlink policy and document it next to the shell script).
 
 ## Authentication
 

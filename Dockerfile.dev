@@ -12,17 +12,17 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy proto files
-COPY proto/ proto/
+# Canonical contract from many_faces_proto (shallow clone at build time)
+RUN apt-get update -qq && apt-get install -y -qq git >/dev/null \
+    && git clone --depth 1 https://github.com/01laky/many_faces_proto.git /mfproto
 
-# Generate Python gRPC code from proto files
-# This creates proto/health_pb2.py and proto/health_pb2_grpc.py
-# Output is set to proto/ directory to match the import path in server.py
-RUN python3 -m grpc_tools.protoc \
+# Generate Python gRPC code into proto/ (matches server.py import layout)
+RUN mkdir -p proto \
+    && python3 -m grpc_tools.protoc \
     --python_out=proto \
     --grpc_python_out=proto \
-    --proto_path=proto \
-    proto/health.proto
+    --proto_path=/mfproto/proto \
+    health.proto
 
 # Fix import in health_pb2_grpc.py - it imports health_pb2 without proto. prefix
 # We need to change it to import proto.health_pb2

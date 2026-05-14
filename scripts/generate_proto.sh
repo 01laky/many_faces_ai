@@ -1,5 +1,5 @@
 #!/bin/bash
-# Generate Python gRPC stubs from proto/health.proto into proto/
+# Generate Python gRPC stubs from many_faces_proto (health contract) into proto/
 
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -10,10 +10,16 @@ if [[ -x "$ROOT/.venv/bin/python" ]]; then
   PY="$ROOT/.venv/bin/python"
 fi
 
-echo "Generating gRPC Python code from proto/health.proto (using $PY)..."
+PROTO_ROOT="${ROOT}/../many_faces_proto/proto"
+if [[ ! -d "$PROTO_ROOT" ]]; then
+  echo "error: many_faces_proto not found at ${PROTO_ROOT} (clone monorepo with --recursive or clone many_faces_proto beside many_faces_ai)." >&2
+  exit 1
+fi
+
+echo "Generating gRPC Python code from ${PROTO_ROOT}/health.proto (using $PY)..."
 "$PY" -m grpc_tools.protoc \
-  -I proto \
+  -I "$PROTO_ROOT" \
   --python_out=proto \
   --grpc_python_out=proto \
-  proto/health.proto
+  health.proto
 echo "Done: proto/health_pb2.py, proto/health_pb2_grpc.py"
