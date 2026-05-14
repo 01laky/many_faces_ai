@@ -326,9 +326,7 @@ class TestGenerateWithStatsContext:
         assert "prompt is required" in resp.error
         mock_ai.generate.assert_not_called()
 
-    def test_generate_rejects_whitespace_only_prompt(
-        self, servicer, mock_context, monkeypatch
-    ):
+    def test_generate_rejects_whitespace_only_prompt(self, servicer, mock_context, monkeypatch):
         mock_ai = MagicMock()
         monkeypatch.setattr(server, "_ai_service", mock_ai)
         req = health_pb2.GenerateRequest(prompt="  \n\t  ", max_new_tokens=10)
