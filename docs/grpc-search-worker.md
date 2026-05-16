@@ -7,8 +7,10 @@ The Python **many_faces_ai** service does **not** call Elasticsearch HTTP for sh
 Source of truth (versioned RPCs):
 
 ```text
-many_faces_elastic/proto/manyfaces/search/v1/search.proto
+many_faces_proto/proto/manyfaces/search/v1/search.proto
 ```
+
+(Nested **`many_faces_proto`** submodule inside **`many_faces_elastic`** / **`many_faces_ai`** — Strategy B; run `git submodule update --init --recursive` before codegen.)
 
 Today this defines `SearchService.Ping` for reachability checks. Future RPCs (`Search`, `IndexDocument`, …) will be added here first, then:
 
