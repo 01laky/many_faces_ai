@@ -305,6 +305,7 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
 
         The backend still validates confidence/decision ranges and never auto-publishes solely on this response.
         """
+        # PI-4: mirror backend sanitizer at RPC entry (untrusted creator content only).
         from moderation_input_sanitize import sanitize_for_review
 
         title, body, media_url = sanitize_for_review(

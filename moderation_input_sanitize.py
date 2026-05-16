@@ -1,7 +1,9 @@
 """
-Normalize untrusted title/body/media URL before ReviewContent classification.
+SHV2 PI-4: normalize untrusted title/body/media URL before ReviewContent classification.
 
-Mirrors many_faces_backend ContentModerationInputSanitizer (defense in depth).
+Mirrors many_faces_backend ``ContentModerationInputSanitizer`` (defense in depth). The .NET worker
+also sanitizes before gRPC; this module ensures delimiter/bidi/zero-width smuggling cannot bypass
+keyword classifiers inside the Python process when fields are sent to any LLM path.
 """
 
 from __future__ import annotations
