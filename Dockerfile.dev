@@ -9,7 +9,8 @@ WORKDIR /app
 # Copy requirements first for better Docker layer caching
 COPY requirements.txt .
 
-# Install Python dependencies
+# CPU-only PyTorch (avoids multi-GB CUDA wheels in the image; we run on CPU in dev).
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Nested many_faces_proto submodule (Strategy B) — copy into image for protoc

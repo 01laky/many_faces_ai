@@ -3,7 +3,7 @@
 ai_model_service.py - Multilingual conversational AI service
 
 Model: Qwen/Qwen3-4B-Instruct-2507 by default (override with MFAI_AI_MODEL_NAME).
-For faster local dev in Docker, compose often sets Qwen2.5-1.5B-Instruct (~3× smaller).
+Weights are cached on the host at .data/huggingface when using docker-compose.dev.yml.
 """
 
 import logging
@@ -15,8 +15,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 logger = logging.getLogger(__name__)
 
-# Override in Docker via MFAI_AI_MODEL_NAME (compose defaults to 0.5B for CPU RAM).
-DEFAULT_MODEL_NAME = "Qwen/Qwen2.5-0.5B-Instruct"
+# Override in Docker via MFAI_AI_MODEL_NAME.
+DEFAULT_MODEL_NAME = "Qwen/Qwen3-4B-Instruct-2507"
 DEFAULT_MAX_NEW_TOKENS = 200
 # Safety cap even when backend requests more (CPU Docker is slow with large values).
 DEFAULT_MAX_NEW_TOKENS_CAP = 512
@@ -65,12 +65,12 @@ You have solid knowledge of these technologies and can help with questions about
 - **General programming:** algorithms, data structures, design patterns, REST API design, database design
 
 ## Communication rules
-1. **Language:** Always respond in the same language the user writes in. If the user writes in Slovak, respond in Slovak. If in English, respond in English. If in Czech, respond in Czech.
-2. **Style:** Be friendly, clear, and concise. Use short paragraphs and bullet points when appropriate.
+1. **Language:** Always respond in the same language the user writes in (Slovak → Slovak, Czech → Czech, English → English). Never mix languages in one reply.
+2. **Style:** Be friendly, clear, and concise — one or two short sentences for simple greetings. Do not prefix replies with your name (no "MFAI Assistant:").
 3. **Code:** When showing code examples, use proper markdown code blocks with language specification.
 4. **Honesty:** If you don't know something or are unsure, say so honestly. Don't make up facts.
-5. **Helpfulness:** Proactively suggest related information or next steps when relevant.
-6. **Formatting:** Use markdown formatting (bold, lists, code blocks) to make responses readable.
+5. **Platform statistics:** When a [Read-only aggregate platform statistics] JSON block is present, use only those numbers for count questions; if the answer is not in the JSON, say you don't have that figure.
+6. **Formatting:** Use markdown sparingly; plain sentences are fine for chat.
 
 ## Example topics you can help with
 - Explaining how the MFAI Demo application works
@@ -236,6 +236,10 @@ class AIModelService:
 
             new_tokens = output_ids[:, input_ids.shape[-1] :]
             response = tok.decode(new_tokens[0], skip_special_tokens=True).strip()
+
+            for prefix in ("MFAI Assistant:", "MFAI Assistant :"):
+                if response.lower().startswith(prefix.lower()):
+                    response = response[len(prefix) :].strip()
 
             for marker in ["User:", "user:", "AI:", "ai:", "<|im_end|>", "<|endoftext|>"]:
                 idx = response.find(marker)
