@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import threading
+from datetime import datetime, timezone
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -18,9 +19,9 @@ logger = logging.getLogger(__name__)
 
 # Override in Docker via MFAI_AI_MODEL_NAME.
 DEFAULT_MODEL_NAME = "Qwen/Qwen3-4B-Instruct-2507"
-DEFAULT_MAX_NEW_TOKENS = 200
+DEFAULT_MAX_NEW_TOKENS = 256
 # Safety cap even when backend requests more (CPU Docker is slow with large values).
-DEFAULT_MAX_NEW_TOKENS_CAP = 512
+DEFAULT_MAX_NEW_TOKENS_CAP = 384
 
 def _thread_count() -> int:
     raw = os.getenv("OMP_NUM_THREADS") or os.getenv("MFAI_CONTAINER_CPUS") or "4"
@@ -47,6 +48,28 @@ _THINK_BLOCK_RE = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 _THINK_OPEN_RE = re.compile(re.escape(_THINK_TAG_OPEN) + r".*", re.DOTALL | re.IGNORECASE)
+_INVENTED_JSON_FENCE_RE = re.compile(
+    r"```(?:json)?\s*\{[\s\S]*?(?:system_time|__typename)[\s\S]*?\}\s*```",
+    re.IGNORECASE,
+)
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name, str(default)).strip()
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name, str(default)).strip()
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
 _PARROT_CLOSING_RE = re.compile(
     r"\s*(?:"
     r"M[aá]m sa dobre,?\s*ďakujem\.?\s*(?:A ty\??)?|"
@@ -102,8 +125,25 @@ def _strip_thinking_artifacts(text: str) -> str:
     return cleaned.strip()
 
 
+def _strip_invented_json_fences(text: str) -> str:
+    """Drop hallucinated ```json blocks (e.g. fake system_time / __typename)."""
+    cleaned = _INVENTED_JSON_FENCE_RE.sub("", text).strip()
+    return re.sub(r"\n{3,}", "\n\n", cleaned)
+
+
+def _system_prompt_with_runtime() -> str:
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    return (
+        f"{SYSTEM_PROMPT}\n\n"
+        "## Live context (authoritative)\n"
+        f"- Server time now: **{now}** — use for date/time questions in plain language.\n"
+        "- Do not output JSON for clock/time unless the user explicitly asked for raw JSON.\n"
+    )
+
+
 def _sanitize_assistant_reply(text: str, last_user_message: str = "") -> str:
     response = _strip_thinking_artifacts(text.strip())
+    response = _strip_invented_json_fences(response)
     for prefix in ("MFAI Assistant:", "MFAI Assistant :"):
         if response.lower().startswith(prefix.lower()):
             response = response[len(prefix) :].strip()
@@ -145,12 +185,13 @@ You have solid knowledge of these technologies and can help with questions about
 2. **Style:** Be friendly, clear, and concise — one or two short sentences for simple greetings. Do not prefix replies with your name (no "MFAI Assistant:").
 3. **Code:** When showing code examples, use proper markdown code blocks with language specification.
 4. **Honesty:** If you don't know something or are unsure, say so honestly. Don't make up facts.
-5. **Platform statistics:** When a [Read-only aggregate platform statistics] JSON block is present, use only those numbers for count questions; if the answer is not in the JSON, say you don't have that figure.
-6. **Formatting:** Use markdown sparingly; plain sentences are fine for chat.
-7. **Thinking:** Never output internal reasoning, XML tags, or English planning text. Reply with only the final user-facing answer.
-8. **Slovak (sk):** Use standard Slovak (slovenčina), not Czech. Prefer *toto* (not *tohle*). Do not mix Czech words into Slovak replies.
-9. **No parroting:** Answer only the latest user message. Never append a stock closing such as "Mám sa dobre, ďakujem. A ty?" unless the user explicitly asked how you are. Do not repeat phrases from earlier turns or from these instructions.
-10. **Stay on topic:** If the user asks about platform data, MFAI Demo, or "many faces", use the statistics JSON when provided; do not invent phone numbers or unrelated facts. If you lack data, say so briefly in the user's language.
+5. **Platform statistics:** When a platform statistics JSON block is present, use only fields that appear in that JSON for counts (users, posts, etc.). Never invent fields such as `system_time`, `__typename`, or `active_sessions` unless they are in the JSON.
+6. **Date and time:** Use the server time from Live context for "what time is it" questions. Answer in one short sentence (e.g. "Teraz je … UTC."). Do not fabricate JSON.
+7. **Formatting:** Prefer plain sentences. Avoid markdown JSON/code blocks unless the user asked for code or raw data.
+8. **Thinking:** Never output internal reasoning, XML tags, or English planning text. Reply with only the final user-facing answer.
+9. **Slovak (sk):** Use standard Slovak (slovenčina), not Czech. Prefer *toto* (not *tohle*). Use correct grammar; do not mix Cyrillic letters.
+10. **No parroting:** Answer only the latest user message. Never append a stock closing such as "Mám sa dobre, ďakujem. A ty?" unless the user explicitly asked how you are.
+11. **Stay on topic:** Do not invent phone numbers, emails, or APIs. If you lack data, say so briefly in the user's language.
 
 ## Example topics you can help with
 - Explaining how the MFAI Demo application works
@@ -184,7 +225,7 @@ class AIModelService:
             else "cpu"
         )
         self._local_files_only = _env_truthy("MFAI_LOCAL_FILES_ONLY") or _env_truthy("HF_HUB_OFFLINE")
-        self._fast_generation = _env_truthy("MFAI_FAST_GENERATION", "1")
+        self._fast_generation = _env_truthy("MFAI_FAST_GENERATION", "0")
         cap_raw = os.getenv("MFAI_MAX_NEW_TOKENS_CAP", str(DEFAULT_MAX_NEW_TOKENS_CAP))
         try:
             self._max_new_tokens_cap = max(32, int(cap_raw))
@@ -250,7 +291,7 @@ class AIModelService:
     @staticmethod
     def _parse_prompt(prompt: str) -> list[dict]:
         """Convert the 'User: …\\nAI: …' prompt from the backend into chat messages."""
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        messages = [{"role": "system", "content": _system_prompt_with_runtime()}]
         for line in prompt.strip().splitlines():
             line = line.strip()
             if not line:
@@ -299,13 +340,12 @@ class AIModelService:
                 input_text = tok.apply_chat_template(messages, **template_kw)
             input_ids = tok.encode(input_text, return_tensors="pt").to(self._device)
 
-            # Shorter context = faster prefill on CPU
-            max_context = int(os.getenv("MFAI_MAX_CONTEXT_TOKENS", "1200"))
+            max_context = _env_int("MFAI_MAX_CONTEXT_TOKENS", 2048)
             if input_ids.shape[-1] > max_context:
                 input_ids = input_ids[:, -max_context:]
 
-            rep_penalty = float(os.getenv("MFAI_REPETITION_PENALTY", "1.15"))
-            ngram_block = int(os.getenv("MFAI_NO_REPEAT_NGRAM", "3"))
+            rep_penalty = _env_float("MFAI_REPETITION_PENALTY", 1.2)
+            ngram_block = _env_int("MFAI_NO_REPEAT_NGRAM", 4)
             gen_kw: dict = {
                 "max_new_tokens": max_tok,
                 "pad_token_id": tok.eos_token_id,
@@ -318,9 +358,9 @@ class AIModelService:
             else:
                 gen_kw.update(
                     do_sample=True,
-                    temperature=0.7,
-                    top_p=0.9,
-                    top_k=40,
+                    temperature=_env_float("MFAI_TEMPERATURE", 0.65),
+                    top_p=_env_float("MFAI_TOP_P", 0.92),
+                    top_k=_env_int("MFAI_TOP_K", 50),
                 )
 
             with torch.no_grad():

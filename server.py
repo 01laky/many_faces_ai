@@ -241,7 +241,8 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
             js = (request.stats_context_json or "").strip()
             if js:
                 stats_block = (
-                    "[Read-only aggregate platform statistics — JSON only, no personal user data]\n"
+                    "[Platform statistics JSON — use ONLY listed fields for user/post counts. "
+                    "NOT for clock/time. Do NOT invent system_time, __typename, or other fields.]\n"
                     + js
                     + "\n\n---\n\n"
                 )
