@@ -241,8 +241,10 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
             js = (request.stats_context_json or "").strip()
             if js:
                 stats_block = (
-                    "[Platform statistics JSON — use ONLY listed fields for user/post counts. "
-                    "NOT for clock/time. Do NOT invent system_time, __typename, or other fields.]\n"
+                    "[Operator platform statistics JSON — authoritative DB snapshot at snapshotUtc. "
+                    "Use only numeric fields under dashboard (usersCount, messagesCount, "
+                    "faceWallTicketsByStatus, etc.). NOT for clock/time — use Live context server time. "
+                    "Do NOT invent fields.]\n"
                     + js
                     + "\n\n---\n\n"
                 )
