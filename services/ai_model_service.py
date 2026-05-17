@@ -8,6 +8,7 @@ Weights are cached on the host at .data/huggingface when using docker-compose.de
 
 import logging
 import os
+import re
 import threading
 
 import torch
@@ -37,6 +38,36 @@ if hasattr(torch, "set_num_interop_threads"):
 
 def _env_truthy(name: str, default: str = "0") -> bool:
     return os.getenv(name, default).strip().lower() in ("1", "true", "yes", "on")
+
+
+_THINK_TAG_OPEN = "<" + "think" + ">"
+_THINK_TAG_CLOSE = "</" + "think" + ">"
+_THINK_BLOCK_RE = re.compile(
+    re.escape(_THINK_TAG_OPEN) + r".*?" + re.escape(_THINK_TAG_CLOSE),
+    re.DOTALL | re.IGNORECASE,
+)
+_THINK_OPEN_RE = re.compile(re.escape(_THINK_TAG_OPEN) + r".*", re.DOTALL | re.IGNORECASE)
+
+
+def _strip_thinking_artifacts(text: str) -> str:
+    """Remove Qwen3 chain-of-thought blocks that must not appear in chat UI."""
+    if not text:
+        return text
+    cleaned = _THINK_BLOCK_RE.sub("", text)
+    cleaned = _THINK_OPEN_RE.sub("", cleaned)
+    return cleaned.strip()
+
+
+def _sanitize_assistant_reply(text: str) -> str:
+    response = _strip_thinking_artifacts(text.strip())
+    for prefix in ("MFAI Assistant:", "MFAI Assistant :"):
+        if response.lower().startswith(prefix.lower()):
+            response = response[len(prefix) :].strip()
+    for marker in ["User:", "user:", "AI:", "ai:", "<|im_end|>", "<|endoftext|>"]:
+        idx = response.find(marker)
+        if idx > 0:
+            response = response[:idx].strip()
+    return response if response else "..."
 
 
 SYSTEM_PROMPT = """You are MFAI Assistant – an intelligent, friendly and knowledgeable AI assistant built into the MFAI Demo application.
@@ -71,6 +102,8 @@ You have solid knowledge of these technologies and can help with questions about
 4. **Honesty:** If you don't know something or are unsure, say so honestly. Don't make up facts.
 5. **Platform statistics:** When a [Read-only aggregate platform statistics] JSON block is present, use only those numbers for count questions; if the answer is not in the JSON, say you don't have that figure.
 6. **Formatting:** Use markdown sparingly; plain sentences are fine for chat.
+7. **Thinking:** Never output internal reasoning, XML tags, or English planning text. Reply with only the final user-facing answer.
+8. **Slovak (sk):** Use standard Slovak (slovenčina), not Czech. Prefer: *toto* (not *tohle*), *máš* in context of *ako sa máš*, *dnes* with natural word order. Keep greetings short and natural, e.g. "Ahoj! Mám sa dobre, ďakujem. A ty?" — not literal word-for-word translation from English.
 
 ## Example topics you can help with
 - Explaining how the MFAI Demo application works
@@ -206,9 +239,17 @@ class AIModelService:
             messages.append({"role": "user", "content": prompt.strip()})
 
         try:
-            input_text = tok.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True
-            )
+            template_kw: dict = {"tokenize": False, "add_generation_prompt": True}
+            if _env_truthy("MFAI_ENABLE_THINKING", "0"):
+                template_kw["enable_thinking"] = True
+            else:
+                template_kw["enable_thinking"] = False
+            try:
+                input_text = tok.apply_chat_template(messages, **template_kw)
+            except TypeError:
+                # Older transformers without enable_thinking
+                template_kw.pop("enable_thinking", None)
+                input_text = tok.apply_chat_template(messages, **template_kw)
             input_ids = tok.encode(input_text, return_tensors="pt").to(self._device)
 
             # Shorter context = faster prefill on CPU
@@ -235,18 +276,8 @@ class AIModelService:
                 output_ids = self._model.generate(input_ids, **gen_kw)
 
             new_tokens = output_ids[:, input_ids.shape[-1] :]
-            response = tok.decode(new_tokens[0], skip_special_tokens=True).strip()
-
-            for prefix in ("MFAI Assistant:", "MFAI Assistant :"):
-                if response.lower().startswith(prefix.lower()):
-                    response = response[len(prefix) :].strip()
-
-            for marker in ["User:", "user:", "AI:", "ai:", "<|im_end|>", "<|endoftext|>"]:
-                idx = response.find(marker)
-                if idx > 0:
-                    response = response[:idx].strip()
-
-            return response if response else "..."
+            response = tok.decode(new_tokens[0], skip_special_tokens=True)
+            return _sanitize_assistant_reply(response)
         except Exception as e:
             logger.exception("Error generating text: %s", e)
             return ""
