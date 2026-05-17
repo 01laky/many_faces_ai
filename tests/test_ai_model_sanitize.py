@@ -10,16 +10,27 @@ _THINK_CLOSE = "</" + "think" + ">"
 
 
 def test_strips_think_blocks():
-    raw = (
-        f"{_THINK_OPEN}User said ahoj in Slovak. I will answer in Slovak.{_THINK_CLOSE}\n"
-        "Ahoj! Mám sa dobre, ďakujem."
-    )
-    assert _sanitize_assistant_reply(raw) == "Ahoj! Mám sa dobre, ďakujem."
+    raw = f"{_THINK_OPEN}User said ahoj in Slovak.{_THINK_CLOSE}\nAhoj!"
+    assert _sanitize_assistant_reply(raw, "ahoj") == "Ahoj!"
 
 
 def test_strips_mfai_prefix():
-    assert _sanitize_assistant_reply("MFAI Assistant: Ahoj!") == "Ahoj!"
+    assert _sanitize_assistant_reply("MFAI Assistant: Ahoj!", "test") == "Ahoj!"
 
 
 def test_empty_after_strip_returns_ellipsis():
-    assert _sanitize_assistant_reply(f"{_THINK_OPEN}only reasoning{_THINK_CLOSE}") == "..."
+    assert _sanitize_assistant_reply(f"{_THINK_OPEN}only reasoning{_THINK_CLOSE}", "x") == "..."
+
+
+def test_trims_parroted_closing_unless_user_asked_wellbeing():
+    assert (
+        _sanitize_assistant_reply(
+            "Neexistuje telefónne číslo. Mám sa dobre, ďakujem. A ty?",
+            "tel mi nieco",
+        )
+        == "Neexistuje telefónne číslo."
+    )
+    assert (
+        _sanitize_assistant_reply("Mám sa dobre, ďakujem. A ty?", "ako sa máš?")
+        == "Mám sa dobre, ďakujem. A ty?"
+    )

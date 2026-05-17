@@ -47,6 +47,50 @@ _THINK_BLOCK_RE = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 _THINK_OPEN_RE = re.compile(re.escape(_THINK_TAG_OPEN) + r".*", re.DOTALL | re.IGNORECASE)
+_PARROT_CLOSING_RE = re.compile(
+    r"\s*(?:"
+    r"M[aá]m sa dobre,?\s*ďakujem\.?\s*(?:A ty\??)?|"
+    r"I am doing well,?\s*thank you\.?\s*(?:And you\??)?"
+    r")\s*$",
+    re.IGNORECASE,
+)
+
+
+def _last_user_message_from_messages(messages: list[dict]) -> str:
+    for msg in reversed(messages):
+        if msg.get("role") == "user":
+            content = msg.get("content")
+            if isinstance(content, str) and content.strip():
+                return content.strip()
+    return ""
+
+
+def _user_asked_about_wellbeing(user_message: str) -> bool:
+    u = user_message.lower()
+    return any(
+        phrase in u
+        for phrase in (
+            "ako sa máš",
+            "ako sa mas",
+            "ako sa máte",
+            "how are you",
+            "how r u",
+            "how are u",
+        )
+    )
+
+
+def _trim_parroted_closing(text: str, last_user_message: str) -> str:
+    """Drop the stock wellbeing sign-off unless the user asked how you are."""
+    if not text or _user_asked_about_wellbeing(last_user_message):
+        return text
+    cleaned = text.strip()
+    while True:
+        next_text = _PARROT_CLOSING_RE.sub("", cleaned).strip()
+        if next_text == cleaned:
+            break
+        cleaned = next_text
+    return cleaned if cleaned else text.strip()
 
 
 def _strip_thinking_artifacts(text: str) -> str:
@@ -58,7 +102,7 @@ def _strip_thinking_artifacts(text: str) -> str:
     return cleaned.strip()
 
 
-def _sanitize_assistant_reply(text: str) -> str:
+def _sanitize_assistant_reply(text: str, last_user_message: str = "") -> str:
     response = _strip_thinking_artifacts(text.strip())
     for prefix in ("MFAI Assistant:", "MFAI Assistant :"):
         if response.lower().startswith(prefix.lower()):
@@ -67,6 +111,7 @@ def _sanitize_assistant_reply(text: str) -> str:
         idx = response.find(marker)
         if idx > 0:
             response = response[:idx].strip()
+    response = _trim_parroted_closing(response, last_user_message)
     return response if response else "..."
 
 
@@ -103,7 +148,9 @@ You have solid knowledge of these technologies and can help with questions about
 5. **Platform statistics:** When a [Read-only aggregate platform statistics] JSON block is present, use only those numbers for count questions; if the answer is not in the JSON, say you don't have that figure.
 6. **Formatting:** Use markdown sparingly; plain sentences are fine for chat.
 7. **Thinking:** Never output internal reasoning, XML tags, or English planning text. Reply with only the final user-facing answer.
-8. **Slovak (sk):** Use standard Slovak (slovenčina), not Czech. Prefer: *toto* (not *tohle*), *máš* in context of *ako sa máš*, *dnes* with natural word order. Keep greetings short and natural, e.g. "Ahoj! Mám sa dobre, ďakujem. A ty?" — not literal word-for-word translation from English.
+8. **Slovak (sk):** Use standard Slovak (slovenčina), not Czech. Prefer *toto* (not *tohle*). Do not mix Czech words into Slovak replies.
+9. **No parroting:** Answer only the latest user message. Never append a stock closing such as "Mám sa dobre, ďakujem. A ty?" unless the user explicitly asked how you are. Do not repeat phrases from earlier turns or from these instructions.
+10. **Stay on topic:** If the user asks about platform data, MFAI Demo, or "many faces", use the statistics JSON when provided; do not invent phone numbers or unrelated facts. If you lack data, say so briefly in the user's language.
 
 ## Example topics you can help with
 - Explaining how the MFAI Demo application works
@@ -257,10 +304,15 @@ class AIModelService:
             if input_ids.shape[-1] > max_context:
                 input_ids = input_ids[:, -max_context:]
 
+            rep_penalty = float(os.getenv("MFAI_REPETITION_PENALTY", "1.15"))
+            ngram_block = int(os.getenv("MFAI_NO_REPEAT_NGRAM", "3"))
             gen_kw: dict = {
                 "max_new_tokens": max_tok,
                 "pad_token_id": tok.eos_token_id,
+                "repetition_penalty": rep_penalty,
             }
+            if ngram_block >= 2:
+                gen_kw["no_repeat_ngram_size"] = ngram_block
             if self._fast_generation:
                 gen_kw["do_sample"] = False
             else:
@@ -269,7 +321,6 @@ class AIModelService:
                     temperature=0.7,
                     top_p=0.9,
                     top_k=40,
-                    repetition_penalty=1.15,
                 )
 
             with torch.no_grad():
@@ -277,7 +328,8 @@ class AIModelService:
 
             new_tokens = output_ids[:, input_ids.shape[-1] :]
             response = tok.decode(new_tokens[0], skip_special_tokens=True)
-            return _sanitize_assistant_reply(response)
+            last_user = _last_user_message_from_messages(messages)
+            return _sanitize_assistant_reply(response, last_user)
         except Exception as e:
             logger.exception("Error generating text: %s", e)
             return ""
