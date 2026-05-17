@@ -11,6 +11,7 @@ Usage:
     ./server.py
 """
 
+import json
 import logging
 import os
 import re
@@ -144,10 +145,44 @@ try:
     from services.ai_model_service import AIModelService
 
     _ai_service = AIModelService()
-    logger.info("AIModelService ready (Qwen model will load on first Generate request)")
+    logger.info("AIModelService ready (Qwen loads on first request or background preload)")
 except ImportError as e:
     logger.warning("AIModelService not available: %s – Generate RPC will not work", e)
     _ai_service = None
+
+
+def _model_status_payload() -> dict:
+    if _ai_service is None:
+        return {
+            "ready": False,
+            "loading": False,
+            "unavailable": True,
+            "modelName": None,
+        }
+    return {
+        "ready": _ai_service.is_loaded(),
+        "loading": _ai_service.is_loading(),
+        "unavailable": _ai_service.is_unavailable(),
+        "modelName": _ai_service.model_name,
+        "error": _ai_service.load_error(),
+    }
+
+
+def _preload_model_blocking() -> bool:
+    """Load weights before accepting traffic (avoids OOM restart loop during background load)."""
+    flag = os.getenv("MFAI_PRELOAD_MODEL", "1").strip().lower()
+    if flag in ("0", "false", "no", "off"):
+        return True
+    if _ai_service is None:
+        return False
+    try:
+        logger.info("Blocking preload of AI model (MFAI_PRELOAD_MODEL)")
+        _ai_service.preload()
+        logger.info("AI model ready for inference.")
+        return True
+    except Exception as exc:
+        logger.error("Blocking model preload failed: %s", exc)
+        return False
 
 
 class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
@@ -172,10 +207,10 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
             HealthCheckResponse with status="success" if server is operational
         """
         logger.info("Health check requested")
-
-        # Return success response indicating server is running and ready
+        status = _model_status_payload()
         return health_pb2.HealthCheckResponse(
-            status="success", message="AI Demo service is running and ready"
+            status="success",
+            message=json.dumps(status),
         )
 
     def Generate(self, request, context):
@@ -216,10 +251,17 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
             text = _ai_service.generate(full_prompt, max_new_tokens=max_new_tokens)
             return health_pb2.GenerateResponse(text=text)
         except RuntimeError as e:
-            if "MODEL_LOADING" in str(e):
+            err = str(e)
+            if "MODEL_LOADING" in err:
                 logger.info("Model is still loading, returning friendly message")
                 return health_pb2.GenerateResponse(
-                    text="⏳ AI model sa práve načítava do pamäte (prvé spustenie po rebuilde). Skúste to prosím o pár minút znova."
+                    text="⏳ AI model sa práve načítava do pamäte. Skúste to prosím o chvíľu znova."
+                )
+            if "MODEL_LOAD_FAILED" in err:
+                logger.warning("Model load previously failed: %s", err)
+                return health_pb2.GenerateResponse(
+                    text="",
+                    error="AI model sa nepodarilo načítať. Reštartujte ai-demo-dev alebo zvoľte menší model (MFAI_AI_MODEL_NAME).",
                 )
             logger.exception("Generate failed: %s", e)
             return health_pb2.GenerateResponse(text="", error=str(e))
@@ -389,7 +431,9 @@ def serve():
     # Add insecure port (for development - use TLS in production)
     server.add_insecure_port(server_address)
 
-    # Start the server
+    if not _preload_model_blocking():
+        logger.warning("Starting gRPC without a loaded model — HealthCheck will report unavailable.")
+
     server.start()
     logger.info(f"gRPC server started on {server_address}")
 
