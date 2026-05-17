@@ -1,34 +1,28 @@
 #!/bin/bash
 
-# rebuild-dev.sh - Script to rebuild Many Faces AI Docker image from scratch
+# rebuild-dev.sh - Rebuild Many Faces AI Docker image
 #
-# This script performs a clean rebuild of the Docker image by:
-# 1. Removing old Docker images
-# 2. Building a fresh image with --no-cache
+# Default: Docker layer cache (fast; host .data/huggingface unchanged).
+# Full rebuild: ./rebuild-dev.sh --no-cache
 #
-# NOTE: This script only builds images, it does NOT start containers.
-# Use ./start-dev.sh to start containers after rebuilding images.
-#
-# Usage: ./rebuild-dev.sh
+# Code-only changes: docker compose restart ai-demo-dev (bind mounts in parent compose).
 
 set -e
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-echo "🔨 Rebuilding Many Faces AI Docker image (clean build)..."
-echo ""
+NO_CACHE=""
+if [[ "${1:-}" == "--no-cache" ]]; then
+  NO_CACHE="--no-cache"
+  echo "🧹 Full rebuild (--no-cache)..."
+  docker images | grep -E "many_faces_ai|ai-demo|soft-ai" | awk '{print $3}' | xargs docker rmi -f 2>/dev/null || true
+else
+  echo "🔨 Rebuilding (cache OK; HF weights stay in ../.data/huggingface)..."
+fi
 
-# Remove old images
-echo "🧹 Removing old Docker images..."
-docker images | grep -E "many_faces_ai|ai-demo" | awk '{print $3}' | xargs docker rmi -f 2>/dev/null || true
-
-# Build new image with --no-cache (clean build)
-echo "🔨 Building fresh Docker image (no cache)..."
 cd ..
-docker-compose -f docker-compose.dev.yml build --no-cache ai-demo-dev
+docker-compose -f docker-compose.dev.yml build $NO_CACHE ai-demo-dev
 
 echo ""
-echo "✅ Rebuild completed!"
-echo ""
-echo "💡 Note: Containers were not started. Use ./start-dev.sh to start containers."
+echo "✅ Done. Start: cd many_faces_ai && ./scripts/start-dev.sh"
