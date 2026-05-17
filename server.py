@@ -242,9 +242,8 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
             if js:
                 stats_block = (
                     "[Operator platform statistics JSON — authoritative DB snapshot at snapshotUtc. "
-                    "Use only numeric fields under dashboard (usersCount, messagesCount, "
-                    "faceWallTicketsByStatus, etc.). NOT for clock/time — use Live context server time. "
-                    "Do NOT invent fields.]\n"
+                    "Use dashboard.* for totals and timeseriesLast7Days.series for 7-day daily trends. "
+                    "NOT for clock/time — use Live context server time. Do NOT invent fields.]\n"
                     + js
                     + "\n\n---\n\n"
                 )
