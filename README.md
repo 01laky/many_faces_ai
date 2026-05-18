@@ -1,22 +1,22 @@
 # Many Faces AI service - gRPC Server
 
-Python gRPC server providing **health checks**, optional **local Qwen text generation** (**`Generate`** with optional **`stats_context_json`**), **public JSON fetch** (**`FetchPublicStats`**), **operator stats chat** (**`OperatorStatsChat`**), and structured **`ReviewContent`** responses for the user-content moderation pipeline used by **many_faces_backend** (`many_faces_backend/`).
+Python **gRPC adapter** providing **health checks**, optional **Ollama-backed text generation** (**`Generate`** with optional **`stats_context_json`**), **public JSON fetch** (**`FetchPublicStats`**), **operator stats chat** (**`OperatorStatsChat`**), and structured **`ReviewContent`** responses for the user-content moderation pipeline used by **many_faces_backend** (`many_faces_backend/`).
 
 ## Documentation in this repo
 
-| Doc | Purpose |
-| --- | -------- |
-| [`README.md`](./README.md) | This file — overview, roadmap, runbook. |
-| [`AI_INTEGRATION.md`](./AI_INTEGRATION.md) | Integration notes for backends and operators (when maintained). |
+| Doc                                                          | Purpose                                                                                    |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| [`README.md`](./README.md)                                   | This file — overview, roadmap, runbook.                                                    |
+| [`AI_INTEGRATION.md`](./AI_INTEGRATION.md)                   | Integration notes for backends and operators (when maintained).                            |
 | [`docs/grpc-search-worker.md`](./docs/grpc-search-worker.md) | Future gRPC client to the Go search-worker (`many_faces_elastic`); same protos as backend. |
 
 Monorepo guides: [`docs/readmes/ai-grpc-overview.md`](../docs/readmes/ai-grpc-overview.md), [`docs/guides/admin-dashboard-metrics.md`](../docs/guides/admin-dashboard-metrics.md).
 
 ## Overview
 
-The Many Faces AI service (**many_faces_ai**; monorepo path `many_faces_ai/`) is a Python-based gRPC server. The backend API (**many_faces_backend** / `many_faces_backend/`) connects on startup for **health verification**, optional **Qwen-backed `Generate`** (with optional **`stats_context_json`** for operator admin chat), **`FetchPublicStats`** / **`OperatorStatsChat`** when **live** public-statistics mode is enabled, and the **`ReviewContent`** contract used by the user-content moderation worker.
+The Many Faces AI service (**many_faces_ai**; monorepo path `many_faces_ai/`) is a Python-based **gRPC adapter**. The backend API (**many_faces_backend** / `many_faces_backend/`) connects on startup for **health verification**, optional **Ollama-backed `Generate`** (with optional **`stats_context_json`** for operator admin chat), **`FetchPublicStats`** / **`OperatorStatsChat`** when **live** public-statistics mode is enabled, and the **`ReviewContent`** contract used by the user-content moderation worker. Inference runs on a **host Ollama** instance (default **`qwen2.5:7b-instruct-q4_K_M`**), not inside this container.
 
-In the broader Many Faces AI architecture, this submodule is the AI workspace for application-aware intelligence. **Implemented today:** gRPC **`Health`**, **`Generate`** (local Qwen + optional aggregate JSON prefix), **`FetchPublicStats`** (HTTP GET helper), **`OperatorStatsChat`** (optional live fetch + **`Generate`**), and **`ReviewContent`** — a deterministic classifier over text and media URL metadata that returns approve / reject / needs-human-review with confidence, risk, flags, reasons, and optional **`image_analysis_boundary`** / **`video_analysis_boundary`** policy flags (placeholders for heavier CV models; this reference classifier does not treat them as sole auto-reject triggers). The longer-term direction is richer context snapshots, admin reports, and chat-security RPCs.
+In the broader Many Faces AI architecture, this submodule is the AI workspace for application-aware intelligence. **Implemented today:** gRPC **`Health`**, **`Generate`** (Ollama chat + optional aggregate JSON prefix), **`FetchPublicStats`** (HTTP GET helper), **`OperatorStatsChat`** (optional live fetch + **`Generate`**), and **`ReviewContent`** — a deterministic classifier over text and media URL metadata that returns approve / reject / needs-human-review with confidence, risk, flags, reasons, and optional **`image_analysis_boundary`** / **`video_analysis_boundary`** policy flags (placeholders for heavier CV models; this reference classifier does not treat them as sole auto-reject triggers). The longer-term direction is richer context snapshots, admin reports, and chat-security RPCs.
 
 The goal is for the AI service to understand the application's structure instead of acting as a generic text generator. Future capabilities can use face configuration, page layouts, grid components, roles, content modules, and backend metadata as context for more useful responses. That makes the service a natural place for application-context summaries, admin-facing insights, feature recommendations, and guided diagnostics across the MFAI platform.
 
@@ -71,10 +71,10 @@ This keeps the AI service useful without making it an uncontrolled publisher.
 
 The **many_faces_backend** `ChatHub` may call these RPCs when a platform operator uses **admin AI chat** with **inline** or **live** public-statistics mode (see monorepo [`docs/guides/admin-dashboard-metrics.md`](../docs/guides/admin-dashboard-metrics.md)):
 
-| RPC | Role |
-| --- | ---- |
-| **`Generate`** | Same as chat completion; if **`stats_context_json`** is set, the servicer prepends a short English banner + JSON + separator **before** the conversational prompt. |
-| **`FetchPublicStats`** | **`GET`** the **`absolute_url`** (must be `http://` or `https://`). For **localhost / 127.0.0.1 / ::1** over HTTPS, TLS verification is relaxed for dev self-signed certs only. |
+| RPC                     | Role                                                                                                                                                                                                                              |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`Generate`**          | Same as chat completion; if **`stats_context_json`** is set, the servicer prepends a short English banner + JSON + separator **before** the conversational prompt.                                                                |
+| **`FetchPublicStats`**  | **`GET`** the **`absolute_url`** (must be `http://` or `https://`). For **localhost / 127.0.0.1 / ::1** over HTTPS, TLS verification is relaxed for dev self-signed certs only.                                                   |
 | **`OperatorStatsChat`** | If **`fetch_live_public_snapshot`**, calls **`FetchPublicStats`** first; builds **`GenerateRequest`** with optional **`stats_context_json`** and a final **`User:` / `AI:`** tail from **`user_message`** and **`history_text`**. |
 
 **Proto:** canonical **`health.proto`** lives in the nested **`many_faces_proto`** submodule at **`many_faces_ai/many_faces_proto/proto/health.proto`**. Regenerate with **`scripts/generate_proto.sh`**; generated `*_pb2.py` files are gitignored — use a **`.venv`** with **`grpcio-tools`** when `python3 -m grpc_tools.protoc` is not available on the host.
@@ -87,7 +87,7 @@ The **many_faces_backend** `ChatHub` may call these RPCs when a platform operato
   - High-performance RPC communication
   - Protocol Buffers for data serialization
   - Health check endpoint
-  - **AI text generation** — **`Generate`** RPC with local Qwen; optional **`stats_context_json`** prepends read-only aggregate JSON (admin operator chat **inline** mode).
+  - **AI text generation** — **`Generate`** RPC via Ollama `/api/chat`; optional **`stats_context_json`** prepends read-only aggregate JSON (admin operator chat **inline** / metrics-like questions).
   - **Public stats fetch** — **`FetchPublicStats`** RPC: server-side HTTP GET of a caller-supplied absolute URL (used by **`OperatorStatsChat`** **live** mode; intended for **`/public/api/Stats/public`** on the API host).
   - **Operator stats chat** — **`OperatorStatsChat`** RPC: optionally fetch JSON, then **`Generate`** with composed **`User:` / `AI:`** prompt tail.
   - **Content review** — **`ReviewContent`** RPC for structured moderation recommendations
@@ -443,7 +443,7 @@ If you see `ModuleNotFoundError` for proto files:
 
 This repository is a **git submodule** of [`many_faces_main`](https://github.com/01laky/many_faces_main). Central guides and the documentation hub:
 
-- [docs/README.md](https://github.com/01laky/many_faces_main/blob/main/docs/README.md)  
-- [docs/guides/ai-assisted-content-approval.md](https://github.com/01laky/many_faces_main/blob/main/docs/guides/ai-assisted-content-approval.md) — end-to-end moderation pipeline  
-- [docs/guides/development.md](https://github.com/01laky/many_faces_main/blob/main/docs/guides/development.md) — `scripts/lint-all.sh`, CI expectations  
-- [docs/guides/git-submodules.md](https://github.com/01laky/many_faces_main/blob/main/docs/guides/git-submodules.md) — submodule workflow  
+- [docs/README.md](https://github.com/01laky/many_faces_main/blob/main/docs/README.md)
+- [docs/guides/ai-assisted-content-approval.md](https://github.com/01laky/many_faces_main/blob/main/docs/guides/ai-assisted-content-approval.md) — end-to-end moderation pipeline
+- [docs/guides/development.md](https://github.com/01laky/many_faces_main/blob/main/docs/guides/development.md) — `scripts/lint-all.sh`, CI expectations
+- [docs/guides/git-submodules.md](https://github.com/01laky/many_faces_main/blob/main/docs/guides/git-submodules.md) — submodule workflow
