@@ -10,7 +10,7 @@ import logging
 import os
 import re
 import threading
-from datetime import datetime
+from datetime import UTC, datetime
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -133,7 +133,7 @@ def _strip_invented_json_fences(text: str) -> str:
 
 
 def _system_prompt_with_runtime() -> str:
-    now = datetime.now(datetime.UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+    now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
     return (
         f"{SYSTEM_PROMPT}\n\n"
         "## Live context (authoritative)\n"
