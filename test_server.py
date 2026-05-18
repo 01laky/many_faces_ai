@@ -340,9 +340,7 @@ class TestGenerateWithStatsContext:
         assert '"usersCount":3' in full_prompt
         assert full_prompt.endswith("User: hi\nAI:")
 
-    def test_generate_passes_response_locale_to_model(
-        self, servicer, mock_context, monkeypatch
-    ):
+    def test_generate_passes_response_locale_to_model(self, servicer, mock_context, monkeypatch):
         mock_ai = MagicMock()
         mock_ai.generate = MagicMock(return_value="ok")
         monkeypatch.setattr(server, "_ai_service", mock_ai)
