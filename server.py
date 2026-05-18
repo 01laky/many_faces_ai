@@ -140,12 +140,12 @@ except (ImportError, ModuleNotFoundError, FileNotFoundError) as e:
     )
     raise ImportError("gRPC stubs missing or invalid; run ./generate_proto.sh from ai_demo/") from e
 
-# Import AI model service - communicates with a local Qwen instruct model
+# Import AI model service - gRPC adapter that calls local Ollama
 try:
     from services.ai_model_service import AIModelService
 
     _ai_service = AIModelService()
-    logger.info("AIModelService ready (Qwen loads on first request or background preload)")
+    logger.info("AIModelService ready (Ollama model checked on health/preload)")
 except ImportError as e:
     logger.warning("AIModelService not available: %s – Generate RPC will not work", e)
     _ai_service = None
@@ -231,7 +231,7 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
         if _ai_service is None:
             return health_pb2.GenerateResponse(
                 text="",
-                error="AIModelService not available (transformers/torch not installed or import failed)",
+                error="AIModelService not available (Ollama adapter import failed)",
             )
         prompt = (request.prompt or "").strip()
         if not prompt:
@@ -263,7 +263,7 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
                 logger.warning("Model load previously failed: %s", err)
                 return health_pb2.GenerateResponse(
                     text="",
-                    error="AI model sa nepodarilo načítať. Reštartujte ai-demo-dev alebo zvoľte menší model (MFAI_AI_MODEL_NAME).",
+                    error="AI model sa nepodarilo načítať cez Ollama. Skontrolujte, či Ollama beží a model OLLAMA_MODEL je stiahnutý.",
                 )
             logger.exception("Generate failed: %s", e)
             return health_pb2.GenerateResponse(text="", error=str(e))

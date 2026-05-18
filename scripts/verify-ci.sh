@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Reproduce GitHub Actions checks locally: protos, ruff, pytest (no torch).
+# Reproduce GitHub Actions checks locally: protos, ruff, pytest.
 # Creates .venv-ci-verify/ on first run (gitignored).
 # Usage: ./verify-ci.sh
 
@@ -35,9 +35,6 @@ echo "🔍 many_faces_ai verify-ci (python: $PY)..."
   grpcio-tools==1.68.1 \
   grpcio-testing==1.68.1 \
   protobuf==5.28.3
-
-# gRPC tests import `server.py`, which needs the same ML stack as local dev (CPU wheels).
-"$PIP" install -q numpy accelerate "transformers>=4.36" torch --extra-index-url https://download.pytorch.org/whl/cpu
 
 PROTO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/many_faces_proto/proto"
 if [[ ! -f "${PROTO_ROOT}/health.proto" ]]; then

@@ -2,25 +2,23 @@
 """
 ai_model_service.py - Multilingual conversational AI service
 
-Model: Qwen/Qwen3-4B-Instruct-2507 by default (override with MFAI_AI_MODEL_NAME).
-Weights are cached on the host at .data/huggingface when using docker-compose.dev.yml.
+Model inference runs through Ollama by default (override with OLLAMA_MODEL).
 """
 
+import json
 import logging
 import os
 import re
-import threading
+import urllib.error
+import urllib.request
 from datetime import UTC, datetime
-
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
 logger = logging.getLogger(__name__)
 
-# Override in Docker via MFAI_AI_MODEL_NAME.
-DEFAULT_MODEL_NAME = "Qwen/Qwen3-4B-Instruct-2507"
+# Override in Docker via OLLAMA_MODEL.
+DEFAULT_MODEL_NAME = "qwen2.5:7b-instruct-q4_K_M"
 DEFAULT_MAX_NEW_TOKENS = 256
-# Safety cap even when backend requests more (CPU Docker is slow with large values).
+# Safety cap even when backend requests more.
 DEFAULT_MAX_NEW_TOKENS_CAP = 384
 
 
@@ -30,16 +28,6 @@ def _thread_count() -> int:
         return max(1, int(float(raw)))
     except ValueError:
         return 4
-
-
-_threads = _thread_count()
-torch.set_num_threads(_threads)
-if hasattr(torch, "set_num_interop_threads"):
-    torch.set_num_interop_threads(max(1, _threads // 2))
-
-
-def _env_truthy(name: str, default: str = "0") -> bool:
-    return os.getenv(name, default).strip().lower() in ("1", "true", "yes", "on")
 
 
 _THINK_TAG_OPEN = "<" + "think" + ">"
@@ -118,7 +106,7 @@ def _trim_parroted_closing(text: str, last_user_message: str) -> str:
 
 
 def _strip_thinking_artifacts(text: str) -> str:
-    """Remove Qwen3 chain-of-thought blocks that must not appear in chat UI."""
+    """Remove chain-of-thought blocks that must not appear in chat UI."""
     if not text:
         return text
     cleaned = _THINK_BLOCK_RE.sub("", text)
@@ -188,7 +176,7 @@ The application you are part of consists of these components:
 You have solid knowledge of these technologies and can help with questions about them:
 - **Frontend:** React, TypeScript, Vite, Material UI, React Router, React Query, Axios, SignalR client
 - **Backend:** C#, ASP.NET Core, Entity Framework Core, SignalR, gRPC, JWT authentication
-- **AI/ML:** Python, PyTorch, Hugging Face Transformers, gRPC, language models
+- **AI/ML:** Python, Ollama, local language models, gRPC
 - **DevOps:** Docker, docker-compose, PostgreSQL, Seq logging, CI/CD
 - **General programming:** algorithms, data structures, design patterns, REST API design, database design
 
@@ -222,28 +210,16 @@ You have solid knowledge of these technologies and can help with questions about
 
 class AIModelService:
     """
-    Multilingual conversational AI service backed by a local Qwen instruct model.
+    Multilingual conversational AI service backed by Ollama.
     """
 
-    _load_lock = threading.Lock()
-
     def __init__(self, model_name: str | None = None):
-        self._model_name = model_name or os.getenv("MFAI_AI_MODEL_NAME", DEFAULT_MODEL_NAME)
-        self._tokenizer = None
-        self._model = None
-        self._loading = False
+        self._model_name = model_name or os.getenv("OLLAMA_MODEL") or DEFAULT_MODEL_NAME
         self._load_error: str | None = None
-        self._device = (
-            "cuda"
-            if torch.cuda.is_available()
-            else "mps"
-            if torch.backends.mps.is_available()
-            else "cpu"
-        )
-        self._local_files_only = _env_truthy("MFAI_LOCAL_FILES_ONLY") or _env_truthy(
-            "HF_HUB_OFFLINE"
-        )
-        self._fast_generation = _env_truthy("MFAI_FAST_GENERATION", "0")
+        self._ollama_base_url = os.getenv(
+            "OLLAMA_BASE_URL", "http://host.docker.internal:11434"
+        ).rstrip("/")
+        self._ollama_timeout_seconds = _env_int("OLLAMA_TIMEOUT_SECONDS", 300)
         cap_raw = os.getenv("MFAI_MAX_NEW_TOKENS_CAP", str(DEFAULT_MAX_NEW_TOKENS_CAP))
         try:
             self._max_new_tokens_cap = max(32, int(cap_raw))
@@ -255,58 +231,89 @@ class AIModelService:
         return self._model_name
 
     def is_loading(self) -> bool:
-        return self._loading and self._model is None and self._load_error is None
+        return False
 
     def is_unavailable(self) -> bool:
-        return self._load_error is not None and self._model is None
+        self._ollama_model_available()
+        return self._load_error is not None
 
     def load_error(self) -> str | None:
         return self._load_error
 
     def preload(self) -> None:
-        """Eager-load weights (e.g. background thread on server start)."""
+        """Verify that the configured Ollama model is available."""
         self._ensure_loaded()
 
     def _ensure_loaded(self):
-        with self._load_lock:
-            if self._model is not None:
-                return
-            if self._load_error is not None:
-                raise RuntimeError(f"MODEL_LOAD_FAILED: {self._load_error}")
-            self._loading = True
+        self._ensure_ollama_ready()
+
+    def _ollama_post_json(self, path: str, payload: dict) -> dict:
+        body = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            f"{self._ollama_base_url}{path}",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self._ollama_timeout_seconds) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"Ollama HTTP {exc.code}: {detail}") from exc
+
+    def _ollama_model_available(self) -> bool:
+        try:
+            self._ollama_post_json("/api/show", {"model": self._model_name})
             self._load_error = None
+            return True
+        except Exception as exc:
+            self._load_error = str(exc)
+            return False
+
+    def _ensure_ollama_ready(self) -> None:
+        if not self._ollama_model_available():
+            raise RuntimeError(
+                f"MODEL_LOAD_FAILED: Ollama model '{self._model_name}' is not ready at "
+                f"{self._ollama_base_url}: {self._load_error}"
+            )
+
+    def _ollama_options(self, max_new_tokens: int) -> dict:
+        options = {
+            "num_ctx": _env_int("OLLAMA_NUM_CTX", 4096),
+            "num_predict": max_new_tokens,
+            "num_thread": _env_int("OLLAMA_NUM_THREAD", _thread_count()),
+            "temperature": _env_float("OLLAMA_TEMPERATURE", 0.35),
+            "top_p": _env_float("OLLAMA_TOP_P", 0.9),
+            "top_k": _env_int("OLLAMA_TOP_K", 40),
+            "repeat_penalty": _env_float("OLLAMA_REPEAT_PENALTY", 1.15),
+        }
+        for option_name, env_name in {
+            "num_gpu": "OLLAMA_NUM_GPU",
+            "num_batch": "OLLAMA_NUM_BATCH",
+        }.items():
+            raw = os.getenv(env_name)
+            if raw is None or not raw.strip():
+                continue
             try:
-                load_threads = max(1, min(2, _thread_count()))
-                torch.set_num_threads(load_threads)
-                logger.info(
-                    "Loading AI model: %s (device=%s, load_threads=%s, local_only=%s)",
-                    self._model_name,
-                    self._device,
-                    load_threads,
-                    self._local_files_only,
-                )
-                tok_kw = {"trust_remote_code": True, "local_files_only": self._local_files_only}
-                self._tokenizer = AutoTokenizer.from_pretrained(self._model_name, **tok_kw)
-                dtype = torch.float16 if self._device in {"cuda", "mps"} else torch.float32
-                model_kw = {
-                    "dtype": dtype,
-                    "trust_remote_code": True,
-                    "low_cpu_mem_usage": True,
-                    "local_files_only": self._local_files_only,
-                }
-                self._model = AutoModelForCausalLM.from_pretrained(self._model_name, **model_kw)
-                self._model.to(self._device)
-                self._model.eval()
-                logger.info(
-                    "AI model %s loaded successfully on %s.", self._model_name, self._device
-                )
-            except Exception as exc:
-                self._load_error = str(exc)
-                logger.exception("AI model load failed: %s", exc)
-                raise
-            finally:
-                self._loading = False
-                torch.set_num_threads(_threads)
+                options[option_name] = int(raw)
+            except ValueError:
+                logger.warning("Ignoring invalid %s=%r", env_name, raw)
+        return options
+
+    def _generate_ollama(self, messages: list[dict], max_new_tokens: int) -> str:
+        payload = {
+            "model": self._model_name,
+            "messages": messages,
+            "stream": False,
+            "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
+            "options": self._ollama_options(max_new_tokens),
+        }
+        data = self._ollama_post_json("/api/chat", payload)
+        message = data.get("message") if isinstance(data, dict) else None
+        if isinstance(message, dict):
+            return str(message.get("content") or "")
+        return str(data.get("response") or "") if isinstance(data, dict) else ""
 
     @staticmethod
     def _parse_prompt(prompt: str) -> list[dict]:
@@ -356,7 +363,6 @@ class AIModelService:
             return ""
 
         self._ensure_loaded()
-        tok = self._tokenizer
         max_tok = self._cap_max_tokens(max_new_tokens)
 
         messages = self._parse_prompt(prompt)
@@ -364,47 +370,7 @@ class AIModelService:
             messages.append({"role": "user", "content": prompt.strip()})
 
         try:
-            template_kw: dict = {"tokenize": False, "add_generation_prompt": True}
-            if _env_truthy("MFAI_ENABLE_THINKING", "0"):
-                template_kw["enable_thinking"] = True
-            else:
-                template_kw["enable_thinking"] = False
-            try:
-                input_text = tok.apply_chat_template(messages, **template_kw)
-            except TypeError:
-                # Older transformers without enable_thinking
-                template_kw.pop("enable_thinking", None)
-                input_text = tok.apply_chat_template(messages, **template_kw)
-            input_ids = tok.encode(input_text, return_tensors="pt").to(self._device)
-
-            max_context = _env_int("MFAI_MAX_CONTEXT_TOKENS", 2048)
-            if input_ids.shape[-1] > max_context:
-                input_ids = input_ids[:, -max_context:]
-
-            rep_penalty = _env_float("MFAI_REPETITION_PENALTY", 1.2)
-            ngram_block = _env_int("MFAI_NO_REPEAT_NGRAM", 4)
-            gen_kw: dict = {
-                "max_new_tokens": max_tok,
-                "pad_token_id": tok.eos_token_id,
-                "repetition_penalty": rep_penalty,
-            }
-            if ngram_block >= 2:
-                gen_kw["no_repeat_ngram_size"] = ngram_block
-            if self._fast_generation:
-                gen_kw["do_sample"] = False
-            else:
-                gen_kw.update(
-                    do_sample=True,
-                    temperature=_env_float("MFAI_TEMPERATURE", 0.65),
-                    top_p=_env_float("MFAI_TOP_P", 0.92),
-                    top_k=_env_int("MFAI_TOP_K", 50),
-                )
-
-            with torch.no_grad():
-                output_ids = self._model.generate(input_ids, **gen_kw)
-
-            new_tokens = output_ids[:, input_ids.shape[-1] :]
-            response = tok.decode(new_tokens[0], skip_special_tokens=True)
+            response = self._generate_ollama(messages, max_tok)
             last_user = _last_user_message_from_messages(messages)
             return _sanitize_assistant_reply(response, last_user)
         except Exception as e:
@@ -412,4 +378,4 @@ class AIModelService:
             return ""
 
     def is_loaded(self) -> bool:
-        return self._model is not None
+        return self._ollama_model_available()

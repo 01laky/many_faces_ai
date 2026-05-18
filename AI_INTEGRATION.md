@@ -1,101 +1,73 @@
 # AI integration — what is in place and how it works
 
-> **Note:** Default **`Generate`** integration today uses **Qwen** via `services/ai_model_service.py` and `README.md` (Model Selection). The DistilGPT-2 walkthrough in §1–§2 below is a **minimal historical sketch** of the transformers stack; prefer the main README for current defaults. **`ReviewContent`** moderation is implemented in `server.py` with tests in `test_server.py`.
+`many_faces_ai` is now a lightweight gRPC adapter. It does not load Hugging Face,
+PyTorch, or Transformers models in-process. Text generation is delegated to a local
+Ollama server over HTTP.
 
-## 1. Open-weight model for Python
+## 1. Model runtime
 
-- **Model:** **DistilGPT-2** (Hugging Face: `distilgpt2`)
-- **Why this choice:**
-  - Runs locally on CPU, no API key or external services
-  - Small footprint (~82M parameters, ~80 MB), good for demos and dev
-  - Apache 2.0 license
-  - Standard stack: `transformers` + `torch`
+- **Runtime:** Ollama
+- **Default model:** `qwen2.5:7b-instruct-q4_K_M`
+- **Why:** keeps the app's existing gRPC contract while letting Ollama handle GGUF
+  quantization, GPU offload, CPU/RAM fallback, context size, and model caching.
 
-## 2. What was added
+Recommended Windows RTX 3050 4GB / 10GB RAM / 8 thread starting point:
 
-### 2.1 Service that talks to the model
+```bash
+OLLAMA_BASE_URL=http://host.docker.internal:11434
+OLLAMA_MODEL=qwen2.5:7b-instruct-q4_K_M
+OLLAMA_NUM_CTX=4096
+OLLAMA_NUM_THREAD=8
+OLLAMA_NUM_GPU=20
+OLLAMA_NUM_BATCH=128
+```
+
+## 2. Service behavior
 
 - **File:** `services/ai_model_service.py`
 - **Class:** `AIModelService`
 - **Behavior:**
-  - **Lazy loading:** weights load on first `generate()` so the server starts quickly
-  - **`generate(prompt, max_new_tokens=50, ...)`** — continues the given prompt and returns prompt + generated continuation
-  - Optional: `do_sample`, `temperature` (randomness / creativity)
-  - Important parts of the service code are commented inline
-
-### 2.2 gRPC integration
-
-- **Proto:** canonical **`many_faces_proto/proto/health.proto`** defines:
-  - **RPC:** `Generate(GenerateRequest) returns (GenerateResponse)`
-  - **GenerateRequest:** `prompt` (string), `max_new_tokens` (int32, optional)
-  - **GenerateResponse:** `text` (generated text), `error` (optional failure message)
-- **Server:** `server.py`:
-  - On startup, creates `AIModelService` (weights not loaded yet)
-  - `HealthServiceServicer` implements `Generate`:
-    - checks `AIModelService` availability,
-    - calls `_ai_service.generate(prompt, max_new_tokens=...)`,
-    - returns `GenerateResponse(text=..., error=...)` or an error string
-  - If `transformers`/`torch` are missing, the server still runs but `Generate` returns an error in `error`
-
-### 2.3 Dependencies and Docker
-
-- **requirements.txt:** `transformers`, `torch`, `accelerate`
-- **Dockerfile.dev:** copies `services/` into the image
-- **Proto:** after editing **`many_faces_proto`** `health.proto`, regenerate Python stubs (`./scripts/generate_proto.sh`) and bump the **`many_faces_proto`** submodule where this repo is consumed.
+  - checks model availability with Ollama `/api/show`
+  - maps backend prompts to Ollama chat messages
+  - preserves operator dashboard/timeseries JSON as system context
+  - calls Ollama `/api/chat` with `stream=false`
+  - returns generated text to the existing gRPC `Generate` response
 
 ## 3. Request flow
 
-1. **Server start**
-   - Load gRPC code from `proto/` and register `HealthService` (HealthCheck + Generate).
-   - Construct `AIModelService()` — still no model weights in memory.
+1. Backend calls `Generate(prompt, max_new_tokens, stats_context_json?)` over gRPC.
+2. `server.py` prepends optional operator statistics JSON before the prompt.
+3. `AIModelService` parses prompt/history into chat messages.
+4. `AIModelService` calls Ollama `/api/chat`.
+5. Response text is sanitized and returned to the backend.
 
-2. **First Generate call**
-   - Client calls `Generate(prompt="The weather today is", max_new_tokens=30)`.
-   - Server calls `_ai_service.generate(...)`.
-   - Inside `AIModelService.generate()`, first call runs `_get_pipeline()`:
-     - download or load cached `distilgpt2`,
-     - build a `transformers` `text-generation` pipeline.
-   - Pipeline produces continuation; returned as `GenerateResponse.text`.
+## 4. Dependencies and Docker
 
-3. **Later Generate calls**
-   - Model stays in memory — inference only.
+- **requirements.txt:** gRPC/protobuf/test/lint dependencies only
+- **Dockerfile.dev:** builds the gRPC adapter image and generated proto stubs
+- **No:** `torch`, `transformers`, `accelerate`, Hugging Face model cache
 
-4. **Errors**
-   - Empty `prompt` → `GenerateResponse(error="prompt is required")`.
-   - Missing `transformers`/`torch` → `GenerateResponse(error="AIModelService not available...")`.
-   - Exception during generation → logged; client gets `GenerateResponse(text="", error=str(e))`.
+## 5. How to run and test
 
-## 4. How to run and test
+1. Start Ollama and pull the model:
 
-- **Local (with generated protos and deps installed):**
-  ```bash
-  pip install -r requirements.txt
-  ./generate_proto.sh   # or generate per README
-  python server.py
-  ```
-- **Docker (recommended):**
+   ```bash
+   ollama pull qwen2.5:7b-instruct-q4_K_M
+   ```
 
-  ```bash
-  ./rebuild-dev.sh
-  ./start-dev.sh
-  ```
+2. Start the gRPC adapter:
 
-  Proto generation runs during build; `services/` is copied into the image.
+   ```bash
+   docker compose -f docker-compose.dev.yml up -d --build ai-demo-dev
+   ```
 
-- **Test Generate (e.g. grpcurl):**
-  ```bash
-  grpcurl -plaintext -d '{"prompt": "The weather today is", "max_new_tokens": 20}' localhost:50051 health.HealthService/Generate
-  ```
+3. Verify:
 
-## 5. ReviewContent (user content moderation)
+   ```bash
+   docker logs ai-demo-dev --tail 100
+   ```
 
-The **`ReviewContent`** RPC is defined in **`many_faces_proto/proto/health.proto`** and implemented in `server.py` (`HealthServiceServicer.ReviewContent`). Untrusted title, body, and media URL are normalized first via `moderation_input_sanitize.py`. Tests live in `test_server.py` and `test_moderation_input_sanitize.py`. End-to-end product reference: [`docs/guides/ai-assisted-content-approval.md`](../docs/guides/ai-assisted-content-approval.md) in the **`many_faces_main`** monorepo.
+## 6. ReviewContent
 
-## 6. Summary
-
-| Piece      | Location                          | Role                                     |
-| ---------- | --------------------------------- | ---------------------------------------- |
-| Open model | DistilGPT-2 (Hugging Face)        | Local text generation without an API key |
-| Service    | `services/ai_model_service.py`    | Load weights, `generate()`               |
-| gRPC       | `many_faces_proto` `health.proto`, `server.py` | `Generate` RPC and handler               |
-| Deps       | `requirements.txt`, Dockerfile    | `transformers`, `torch`, `accelerate`    |
+The `ReviewContent` RPC is still implemented in `server.py` as a deterministic
+keyword/media fallback. It does not depend on Ollama.

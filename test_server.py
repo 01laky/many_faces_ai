@@ -243,16 +243,50 @@ class TestHealthServiceServicer:
 
         assert "spam" in response.flags
 
-    def test_ai_model_service_defaults_to_qwen3_with_env_override(self, monkeypatch):
-        """Test configured model defaults without loading model weights"""
-        pytest.importorskip("torch")
+    def test_ai_model_service_defaults_to_ollama_model_with_env_override(self, monkeypatch):
+        """Test configured Ollama model defaults without calling Ollama."""
         from services.ai_model_service import DEFAULT_MODEL_NAME, AIModelService
 
-        assert DEFAULT_MODEL_NAME == "Qwen/Qwen3-4B-Instruct-2507"
+        assert DEFAULT_MODEL_NAME == "qwen2.5:7b-instruct-q4_K_M"
 
-        monkeypatch.setenv("MFAI_AI_MODEL_NAME", "Qwen/Qwen3-0.6B")
+        monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:7b-instruct-q4_K_M")
         service = AIModelService()
-        assert service._model_name == "Qwen/Qwen3-0.6B"
+        assert service._model_name == "qwen2.5:7b-instruct-q4_K_M"
+
+    def test_ai_model_service_ollama_backend_uses_chat_options(self, monkeypatch):
+        """Ollama mode should keep gRPC surface but call Ollama with resource options."""
+        from services.ai_model_service import AIModelService
+
+        monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:7b-instruct-q4_K_M")
+        monkeypatch.setenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
+        monkeypatch.setenv("OLLAMA_NUM_CTX", "4096")
+        monkeypatch.setenv("OLLAMA_NUM_THREAD", "8")
+        monkeypatch.setenv("OLLAMA_NUM_GPU", "20")
+        monkeypatch.setenv("OLLAMA_NUM_BATCH", "128")
+
+        service = AIModelService()
+        calls = []
+
+        def fake_post(path: str, payload: dict) -> dict:
+            calls.append((path, payload))
+            if path == "/api/show":
+                return {"model": payload["model"]}
+            if path == "/api/chat":
+                return {"message": {"content": "42"}}
+            raise AssertionError(path)
+
+        monkeypatch.setattr(service, "_ollama_post_json", fake_post)
+
+        assert service.model_name == "qwen2.5:7b-instruct-q4_K_M"
+        assert service.generate("User: How many users are registered?\nAI:", 12) == "42"
+
+        chat_payload = next(payload for path, payload in calls if path == "/api/chat")
+        assert chat_payload["model"] == "qwen2.5:7b-instruct-q4_K_M"
+        assert chat_payload["stream"] is False
+        assert chat_payload["options"]["num_ctx"] == 4096
+        assert chat_payload["options"]["num_thread"] == 8
+        assert chat_payload["options"]["num_gpu"] == 20
+        assert chat_payload["options"]["num_batch"] == 128
 
 
 class TestModerationInputSanitize:

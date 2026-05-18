@@ -3,9 +3,7 @@ grpcio>=1.76.0
 grpcio-tools>=1.76.0
 protobuf>=6.33.0
 
-# AI model – local Hugging Face (Qwen3). torch is installed in Dockerfile.dev (CPU wheels only).
-transformers>=4.51.0,<5.0.0
-accelerate>=0.25.0
+# AI generation uses Ollama over HTTP; no local PyTorch/Transformers runtime in this container.
 
 # Linting (dev)
 ruff>=0.8.0

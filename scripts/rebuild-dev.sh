@@ -2,7 +2,7 @@
 
 # rebuild-dev.sh - Rebuild Many Faces AI Docker image
 #
-# Default: Docker layer cache (fast; host .data/huggingface unchanged).
+# Default: Docker layer cache (fast; Ollama model cache is outside this image).
 # Full rebuild: ./rebuild-dev.sh --no-cache
 #
 # Code-only changes: docker compose restart ai-demo-dev (bind mounts in parent compose).
@@ -18,7 +18,7 @@ if [[ "${1:-}" == "--no-cache" ]]; then
   echo "🧹 Full rebuild (--no-cache)..."
   docker images | grep -E "many_faces_ai|ai-demo|soft-ai" | awk '{print $3}' | xargs docker rmi -f 2>/dev/null || true
 else
-  echo "🔨 Rebuilding (cache OK; HF weights stay in ../.data/huggingface)..."
+  echo "🔨 Rebuilding (cache OK; Ollama model cache is outside this image)..."
 fi
 
 cd ..

@@ -123,7 +123,7 @@ many_faces_ai/
 ├── test_moderation_input_sanitize.py  # Unit tests for sanitizer
 ├── services/               # AI model service
 │   ├── __init__.py
-│   └── ai_model_service.py # Qwen wrapper (generate)
+│   └── ai_model_service.py # Ollama HTTP adapter (generate)
 ├── requirements.txt        # Python dependencies
 ├── Dockerfile.dev          # Development Dockerfile
 └── README.md               # This file
@@ -135,19 +135,28 @@ Local and Docker flows are covered below under **Model Selection** and **Running
 
 ## Model Selection
 
-The default local LLM is:
+The default local LLM is served by Ollama:
 
-- `Qwen/Qwen3-4B-Instruct-2507`
+- `qwen2.5:7b-instruct-q4_K_M`
 
-This is a free/open-weight Qwen3 instruct model and a practical default for local development. Larger Qwen variants such as `Qwen/Qwen3-30B-A3B-Instruct-2507` can provide stronger reasoning, but they require significantly more memory and are better served through a dedicated inference runtime such as vLLM.
+`many_faces_ai` no longer loads Hugging Face / PyTorch weights directly. It remains the gRPC adapter on port `50051` and calls Ollama's local HTTP API for generation.
 
 You can override the model without changing code:
 
 ```bash
-export MFAI_AI_MODEL_NAME="Qwen/Qwen3-0.6B"
+export OLLAMA_MODEL="qwen2.5:7b-instruct-q4_K_M"
 ```
 
-Use a smaller Qwen model for low-memory laptops, and a larger Qwen3 model for stronger admin/chat reasoning when hardware allows.
+For a Windows machine with RTX 3050 4GB VRAM, about 10GB usable RAM, and 8 CPU threads, start with:
+
+```bash
+export OLLAMA_BASE_URL="http://host.docker.internal:11434"
+export OLLAMA_MODEL="qwen2.5:7b-instruct-q4_K_M"
+export OLLAMA_NUM_CTX=4096
+export OLLAMA_NUM_THREAD=8
+export OLLAMA_NUM_GPU=20
+export OLLAMA_NUM_BATCH=128
+```
 
 ### Running in Docker Container (Recommended)
 
@@ -250,14 +259,14 @@ The service provides a `HealthCheck` RPC method:
 - **Request**: `HealthCheckRequest` (empty message)
 - **Response**: `HealthCheckResponse` with:
   - `status` - Service status (e.g., "success")
-  - `message` - Status message (e.g., "Many Faces AI service service is running")
+  - `message` - JSON model status (`ready`, `loading`, `unavailable`, `modelName`, `error`)
 
 ### Generate (AI text generation)
 
 - **Method**: `Generate`
 - **Request**: `GenerateRequest` with `prompt` (string), optional `max_new_tokens` (int32)
 - **Response**: `GenerateResponse` with `text` (generated text), optional `error` (if failed)
-- Uses local **DistilGPT-2** model (Hugging Face); no API key. See **AI_INTEGRATION.md** for details.
+- Calls local **Ollama** (`/api/chat`); no external cloud API key.
 
 - **Port**: 50051 (default, configurable via `PORT` environment variable)
 

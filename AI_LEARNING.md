@@ -1,6 +1,6 @@
 # How an AI model can “know more” — context, RAG, fine-tuning
 
-**DistilGPT-2** is **pre-trained** on a large general text corpus. It does **not** learn from our chat by itself — each call is stateless unless you add context. Three main ways to give it more information or adapt it:
+The Ollama-served model (default `qwen2.5:7b-instruct-q4_K_M`) is **pre-trained** on a large general text corpus. It does **not** learn from our chat by itself — each call is stateless unless you add context. Three main ways to give it more information or adapt it:
 
 ---
 
@@ -19,7 +19,7 @@
 - Memory only for that conversation; new chat = empty context
 - Bounded length — only so many tokens fit in the prompt
 
-**In this demo:** On `SendToAi`, the backend receives history (last N pairs) from the FE, builds a prompt like `User: ...\nAI: ...\nUser: ...\nAI:`, calls Python, and returns only the new assistant fragment (without echoing the full prompt back).
+**In this demo:** On `SendToAi`, the backend builds a prompt like `User: ...\nAI: ...\nUser: ...\nAI:` and calls `many_faces_ai`. The Python service converts that prompt to Ollama chat messages, optionally preserves operator statistics JSON as system context, calls Ollama, and returns only the new assistant fragment.
 
 ---
 
@@ -69,4 +69,4 @@
 | RAG                  | No              | Document corpus          | Medium |
 | Fine-tuning          | Yes             | Baked into weights       | Higher |
 
-This demo implements **conversation context** — the FE sends the last N messages, the backend builds the prompt, Python returns the reply; within one session the model follows the thread.
+This demo implements **conversation context** — the backend builds the prompt from recent turns, Python calls Ollama, and within one session the model follows the thread.

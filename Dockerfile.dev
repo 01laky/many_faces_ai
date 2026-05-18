@@ -1,5 +1,5 @@
-# Dockerfile.dev - Development Docker image for AI Demo gRPC server
-# This image includes Python, gRPC dependencies, and development tools
+# Dockerfile.dev - Development Docker image for AI Demo gRPC adapter
+# Generation runs in Ollama; this container only serves the existing gRPC API.
 
 FROM python:3.11-slim
 
@@ -9,9 +9,6 @@ WORKDIR /app
 # Copy requirements first for better Docker layer caching
 COPY requirements.txt .
 
-# Default CPU wheels; compose build-arg PYTORCH_INDEX=cu124 for NVIDIA GPU.
-ARG PYTORCH_INDEX=https://download.pytorch.org/whl/cpu
-RUN pip install --no-cache-dir torch --index-url ${PYTORCH_INDEX}
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Nested many_faces_proto submodule (Strategy B) — copy into image for protoc
