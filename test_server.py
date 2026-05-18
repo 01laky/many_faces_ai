@@ -5,6 +5,7 @@ test_server.py - Unit tests for AI Demo gRPC server
 Tests the HealthService gRPC methods using pytest and grpcio-testing.
 """
 
+import json
 import os
 import sys
 from unittest.mock import MagicMock
@@ -58,9 +59,10 @@ class TestHealthServiceServicer:
         # Assert
         assert response is not None
         assert response.status == "success"
-        assert response.message == "AI Demo service is running and ready"
-        assert "running" in response.message.lower()
-        assert "ready" in response.message.lower()
+        payload = json.loads(response.message)
+        assert isinstance(payload, dict)
+        assert "ready" in payload and "loading" in payload and "unavailable" in payload
+        assert "modelName" in payload
 
     def test_health_check_request_type(self, servicer, mock_context):
         """Test that HealthCheck accepts HealthCheckRequest"""
@@ -300,7 +302,7 @@ class TestGenerateWithStatsContext:
         assert resp.text == "ok"
         mock_ai.generate.assert_called_once()
         full_prompt = mock_ai.generate.call_args[0][0]
-        assert "Read-only aggregate platform statistics" in full_prompt
+        assert "Operator platform statistics JSON" in full_prompt
         assert '"usersCount":3' in full_prompt
         assert full_prompt.endswith("User: hi\nAI:")
 
