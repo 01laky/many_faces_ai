@@ -10,7 +10,7 @@ import logging
 import os
 import re
 import threading
-from datetime import datetime, timezone
+from datetime import datetime
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -22,6 +22,7 @@ DEFAULT_MODEL_NAME = "Qwen/Qwen3-4B-Instruct-2507"
 DEFAULT_MAX_NEW_TOKENS = 256
 # Safety cap even when backend requests more (CPU Docker is slow with large values).
 DEFAULT_MAX_NEW_TOKENS_CAP = 384
+
 
 def _thread_count() -> int:
     raw = os.getenv("OMP_NUM_THREADS") or os.getenv("MFAI_CONTAINER_CPUS") or "4"
@@ -132,7 +133,7 @@ def _strip_invented_json_fences(text: str) -> str:
 
 
 def _system_prompt_with_runtime() -> str:
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    now = datetime.now(datetime.UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
     return (
         f"{SYSTEM_PROMPT}\n\n"
         "## Live context (authoritative)\n"
@@ -228,7 +229,9 @@ class AIModelService:
             if torch.backends.mps.is_available()
             else "cpu"
         )
-        self._local_files_only = _env_truthy("MFAI_LOCAL_FILES_ONLY") or _env_truthy("HF_HUB_OFFLINE")
+        self._local_files_only = _env_truthy("MFAI_LOCAL_FILES_ONLY") or _env_truthy(
+            "HF_HUB_OFFLINE"
+        )
         self._fast_generation = _env_truthy("MFAI_FAST_GENERATION", "0")
         cap_raw = os.getenv("MFAI_MAX_NEW_TOKENS_CAP", str(DEFAULT_MAX_NEW_TOKENS_CAP))
         try:
@@ -283,7 +286,9 @@ class AIModelService:
                 self._model = AutoModelForCausalLM.from_pretrained(self._model_name, **model_kw)
                 self._model.to(self._device)
                 self._model.eval()
-                logger.info("AI model %s loaded successfully on %s.", self._model_name, self._device)
+                logger.info(
+                    "AI model %s loaded successfully on %s.", self._model_name, self._device
+                )
             except Exception as exc:
                 self._load_error = str(exc)
                 logger.exception("AI model load failed: %s", exc)

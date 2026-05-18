@@ -434,7 +434,9 @@ def serve():
     server.add_insecure_port(server_address)
 
     if not _preload_model_blocking():
-        logger.warning("Starting gRPC without a loaded model — HealthCheck will report unavailable.")
+        logger.warning(
+            "Starting gRPC without a loaded model — HealthCheck will report unavailable."
+        )
 
     server.start()
     logger.info(f"gRPC server started on {server_address}")
