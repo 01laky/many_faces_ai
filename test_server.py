@@ -306,6 +306,28 @@ class TestGenerateWithStatsContext:
         assert '"usersCount":3' in full_prompt
         assert full_prompt.endswith("User: hi\nAI:")
 
+    def test_parse_prompt_preserves_operator_stats_context(self):
+        prompt = (
+            "[Operator platform statistics JSON — authoritative DB snapshot at snapshotUtc. "
+            "Use dashboard.* for totals.]\n"
+            '{"dashboard":{"usersCount":42},"timeseriesLast7Days":{"series":[]}}\n\n'
+            "---\n\n"
+            "User: How many users are registered?\n"
+            "AI:"
+        )
+
+        ai_model_service = pytest.importorskip("services.ai_model_service")
+        messages = ai_model_service.AIModelService._parse_prompt(prompt)
+
+        stats_messages = [
+            msg
+            for msg in messages
+            if msg["role"] == "system" and '"usersCount":42' in msg["content"]
+        ]
+        assert len(stats_messages) == 1
+        assert messages[-2] is stats_messages[0]
+        assert messages[-1] == {"role": "user", "content": "How many users are registered?"}
+
     def test_generate_stats_context_whitespace_only_behaves_like_absent(
         self, servicer, mock_context, monkeypatch
     ):

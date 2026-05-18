@@ -142,6 +142,17 @@ def _system_prompt_with_runtime() -> str:
     )
 
 
+def _extract_operator_stats_context(prompt: str) -> tuple[str | None, str]:
+    """Split the backend's prepended operator stats block from the chat prompt."""
+    text = prompt.strip()
+    separator = "\n\n---\n\n"
+    if not text.startswith("[Operator platform statistics JSON") or separator not in text:
+        return None, prompt
+
+    stats_block, rest = text.split(separator, 1)
+    return stats_block.strip(), rest.strip()
+
+
 def _sanitize_assistant_reply(text: str, last_user_message: str = "") -> str:
     response = _strip_thinking_artifacts(text.strip())
     response = _strip_invented_json_fences(response)
@@ -300,8 +311,9 @@ class AIModelService:
     @staticmethod
     def _parse_prompt(prompt: str) -> list[dict]:
         """Convert the 'User: …\\nAI: …' prompt from the backend into chat messages."""
+        stats_context, prompt_without_stats = _extract_operator_stats_context(prompt)
         messages = [{"role": "system", "content": _system_prompt_with_runtime()}]
-        for line in prompt.strip().splitlines():
+        for line in prompt_without_stats.strip().splitlines():
             line = line.strip()
             if not line:
                 continue
@@ -313,6 +325,22 @@ class AIModelService:
                 text = line[3:].strip()
                 if text:
                     messages.append({"role": "assistant", "content": text})
+        if stats_context:
+            stats_message = {
+                "role": "system",
+                "content": (
+                    "Authoritative read-only operator platform statistics for the next user question. "
+                    "Use exact values from this JSON when answering statistics questions. "
+                    "If the user asks about any platform metric, prefer dashboard.* totals and "
+                    "timeseriesLast7Days.series trends from this context. Do not invent fields.\n\n"
+                    f"{stats_context}"
+                ),
+            }
+            last_user_idx = next(
+                (i for i in range(len(messages) - 1, 0, -1) if messages[i].get("role") == "user"),
+                len(messages),
+            )
+            messages.insert(last_user_idx, stats_message)
         return messages
 
     def _cap_max_tokens(self, max_new_tokens: int | None) -> int:
