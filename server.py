@@ -249,8 +249,17 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
                 )
         full_prompt = stats_block + prompt
         max_new_tokens = request.max_new_tokens if request.max_new_tokens > 0 else 50
+        response_locale = None
+        if request.HasField("response_locale"):
+            rl = (request.response_locale or "").strip()
+            if rl:
+                response_locale = rl
         try:
-            text = _ai_service.generate(full_prompt, max_new_tokens=max_new_tokens)
+            text = _ai_service.generate(
+                full_prompt,
+                max_new_tokens=max_new_tokens,
+                response_locale=response_locale,
+            )
             return health_pb2.GenerateResponse(text=text)
         except RuntimeError as e:
             err = str(e)

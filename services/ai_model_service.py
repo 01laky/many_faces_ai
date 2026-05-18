@@ -120,10 +120,67 @@ def _strip_invented_json_fences(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", cleaned)
 
 
-def _system_prompt_with_runtime() -> str:
+LOCALE_NAMES = {
+    "en": "English",
+    "sk": "Slovak",
+    "cz": "Czech",
+}
+
+
+def _normalize_response_locale(response_locale: str | None) -> tuple[str, str]:
+    code = (response_locale or "").strip().lower() or "en"
+    if code not in LOCALE_NAMES:
+        if response_locale and str(response_locale).strip():
+            logger.warning("Unknown response_locale=%r, defaulting to en", response_locale)
+        code = "en"
+    return code, LOCALE_NAMES[code]
+
+
+def _response_language_block(locale_code: str, locale_name: str) -> str:
+    return (
+        "## Response language (mandatory)\n"
+        f"- The operator's admin UI locale is: **{locale_name}** (code `{locale_code}`).\n"
+        f"- You MUST write every reply entirely in **{locale_name}**, regardless of:\n"
+        "  - the language of the user's latest message,\n"
+        "  - the language of earlier messages in the conversation history,\n"
+        "  - the language of JSON field names in operator statistics.\n"
+        "- Do not mix languages in one reply unless the user explicitly asks for a translation comparison.\n"
+        f"- If you cannot answer, say so briefly in **{locale_name}**.\n"
+    )
+
+
+def _communication_rules(locale_code: str) -> str:
+    rules = """## Communication rules
+2. **Style:** Be friendly, clear, and concise — one or two short sentences for simple greetings. Do not prefix replies with your name (no "MFAI Assistant:").
+3. **Code:** When showing code examples, use proper markdown code blocks with language specification.
+4. **Honesty:** If you don't know something or are unsure, say so honestly. Don't make up facts.
+5. **Platform statistics:** When operator statistics JSON is present, use ONLY these sources:
+   - `dashboard.*` — totals (same as admin dashboard): usersCount, friendRequestsCount (pending only), messagesCount, facesCount, pagesCount, friendshipsCount, friendRequestsAcceptedCount, friendRequestsRejectedCount, userFollowsCount, userBlocksCount, messagesPendingRequestCount, notificationsCount, albumsCount, blogsCount, reelsCount, storiesCount, storyViewsCount, faceChatRoomsCount, faceChatRoomMembersCount, faceChatRoomMessagesCount, faceChatRoomJoinRequestsPendingCount, faceWallTicketsCount, faceWallTicketsByStatus (Active/Approved/Denied), faceWallTicketCommentsCount, faceWallTicketLikesCount, userFaceProfilesCount, userFaceProfileLikesCount, userFaceProfileCommentsCount, userFaceProfileReviewsCount, albumCommentsCount, blogCommentsCount, reelCommentsCount, storyCommentsCount, albumLikesCount, blogLikesCount, reelLikesCount, storyLikesCount, aiReviewJobsCount, contentModerationEventsCount, oauthClientsCount.
+   - `timeseriesLast7Days.series` — daily counts for users/messages/stories over the last 7 UTC days (trends only).
+   Quote exact numbers; if a field is absent, say you do not have it. Never invent fields.
+6. **Date and time:** Use server time from Live context, NOT statistics JSON. One short sentence for clock questions. No fake JSON blocks.
+7. **Formatting:** Prefer plain sentences. Avoid markdown JSON/code blocks unless the user asked for code or raw data.
+8. **Thinking:** Never output internal reasoning, XML tags, or English planning text. Reply with only the final user-facing answer.
+"""
+    if locale_code == "sk":
+        rules += (
+            "9. **Slovak (sk):** Use standard Slovak (slovenčina), not Czech. "
+            "Prefer *toto* (not *tohle*). Use correct grammar; do not mix Cyrillic letters.\n"
+        )
+    rules += """10. **No parroting:** Answer only the latest user message. Never append a stock closing such as "Mám sa dobre, ďakujem. A ty?" unless the user explicitly asked how you are.
+11. **Stay on topic:** Do not invent phone numbers, emails, or APIs. If you lack data, say so briefly in the operator's response language.
+12. **Many Faces / MFAI:** "Many faces" means this demo platform; user counts and totals come from the statistics JSON when attached, not from imagination.
+"""
+    return rules
+
+
+def _system_prompt_with_runtime(response_locale: str | None = None) -> str:
+    code, name = _normalize_response_locale(response_locale)
     now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
     return (
         f"{SYSTEM_PROMPT}\n\n"
+        f"{_response_language_block(code, name)}\n\n"
+        f"{_communication_rules(code)}\n\n"
         "## Live context (authoritative)\n"
         f"- Server time now: **{now}** — use for date/time questions in plain language.\n"
         "- Do not output JSON for clock/time unless the user explicitly asked for raw JSON.\n"
@@ -179,23 +236,6 @@ You have solid knowledge of these technologies and can help with questions about
 - **AI/ML:** Python, Ollama, local language models, gRPC
 - **DevOps:** Docker, docker-compose, PostgreSQL, Seq logging, CI/CD
 - **General programming:** algorithms, data structures, design patterns, REST API design, database design
-
-## Communication rules
-1. **Language:** Always respond in the same language the user writes in (Slovak → Slovak, Czech → Czech, English → English). Never mix languages in one reply.
-2. **Style:** Be friendly, clear, and concise — one or two short sentences for simple greetings. Do not prefix replies with your name (no "MFAI Assistant:").
-3. **Code:** When showing code examples, use proper markdown code blocks with language specification.
-4. **Honesty:** If you don't know something or are unsure, say so honestly. Don't make up facts.
-5. **Platform statistics:** When operator statistics JSON is present, use ONLY these sources:
-   - `dashboard.*` — totals (same as admin dashboard): usersCount, friendRequestsCount (pending only), messagesCount, facesCount, pagesCount, friendshipsCount, friendRequestsAcceptedCount, friendRequestsRejectedCount, userFollowsCount, userBlocksCount, messagesPendingRequestCount, notificationsCount, albumsCount, blogsCount, reelsCount, storiesCount, storyViewsCount, faceChatRoomsCount, faceChatRoomMembersCount, faceChatRoomMessagesCount, faceChatRoomJoinRequestsPendingCount, faceWallTicketsCount, faceWallTicketsByStatus (Active/Approved/Denied), faceWallTicketCommentsCount, faceWallTicketLikesCount, userFaceProfilesCount, userFaceProfileLikesCount, userFaceProfileCommentsCount, userFaceProfileReviewsCount, albumCommentsCount, blogCommentsCount, reelCommentsCount, storyCommentsCount, albumLikesCount, blogLikesCount, reelLikesCount, storyLikesCount, aiReviewJobsCount, contentModerationEventsCount, oauthClientsCount.
-   - `timeseriesLast7Days.series` — daily counts for users/messages/stories over the last 7 UTC days (trends only).
-   Quote exact numbers; if a field is absent, say you do not have it. Never invent fields.
-6. **Date and time:** Use server time from Live context, NOT statistics JSON. One short sentence for clock questions. No fake JSON blocks.
-7. **Formatting:** Prefer plain sentences. Avoid markdown JSON/code blocks unless the user asked for code or raw data.
-8. **Thinking:** Never output internal reasoning, XML tags, or English planning text. Reply with only the final user-facing answer.
-9. **Slovak (sk):** Use standard Slovak (slovenčina), not Czech. Prefer *toto* (not *tohle*). Use correct grammar; do not mix Cyrillic letters.
-10. **No parroting:** Answer only the latest user message. Never append a stock closing such as "Mám sa dobre, ďakujem. A ty?" unless the user explicitly asked how you are.
-11. **Stay on topic:** Do not invent phone numbers, emails, or APIs. If you lack data, say so briefly in the user's language.
-12. **Many Faces / MFAI:** "Many faces" means this demo platform; user counts and totals come from the statistics JSON when attached, not from imagination.
 
 ## Example topics you can help with
 - Explaining how the MFAI Demo application works
@@ -316,10 +356,10 @@ class AIModelService:
         return str(data.get("response") or "") if isinstance(data, dict) else ""
 
     @staticmethod
-    def _parse_prompt(prompt: str) -> list[dict]:
+    def _parse_prompt(prompt: str, response_locale: str | None = None) -> list[dict]:
         """Convert the 'User: …\\nAI: …' prompt from the backend into chat messages."""
         stats_context, prompt_without_stats = _extract_operator_stats_context(prompt)
-        messages = [{"role": "system", "content": _system_prompt_with_runtime()}]
+        messages = [{"role": "system", "content": _system_prompt_with_runtime(response_locale)}]
         for line in prompt_without_stats.strip().splitlines():
             line = line.strip()
             if not line:
@@ -358,6 +398,7 @@ class AIModelService:
         self,
         prompt: str,
         max_new_tokens: int | None = None,
+        response_locale: str | None = None,
     ) -> str:
         if not prompt or not prompt.strip():
             return ""
@@ -365,7 +406,7 @@ class AIModelService:
         self._ensure_loaded()
         max_tok = self._cap_max_tokens(max_new_tokens)
 
-        messages = self._parse_prompt(prompt)
+        messages = self._parse_prompt(prompt, response_locale=response_locale)
         if len(messages) <= 1:
             messages.append({"role": "user", "content": prompt.strip()})
 

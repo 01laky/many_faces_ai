@@ -340,6 +340,19 @@ class TestGenerateWithStatsContext:
         assert '"usersCount":3' in full_prompt
         assert full_prompt.endswith("User: hi\nAI:")
 
+    def test_generate_passes_response_locale_to_model(
+        self, servicer, mock_context, monkeypatch
+    ):
+        mock_ai = MagicMock()
+        mock_ai.generate = MagicMock(return_value="ok")
+        monkeypatch.setattr(server, "_ai_service", mock_ai)
+        req = health_pb2.GenerateRequest(prompt="User: hi\nAI:", max_new_tokens=12)
+        req.response_locale = "en"
+        resp = servicer.Generate(req, mock_context)
+        assert resp.error == ""
+        mock_ai.generate.assert_called_once()
+        assert mock_ai.generate.call_args.kwargs.get("response_locale") == "en"
+
     def test_parse_prompt_preserves_operator_stats_context(self):
         prompt = (
             "[Operator platform statistics JSON — authoritative DB snapshot at snapshotUtc. "
