@@ -1,13 +1,13 @@
 # Python dependencies for AI Demo gRPC server
-grpcio>=1.76.0
-grpcio-tools>=1.76.0
-protobuf>=6.33.0
+grpcio>=1.80.0
+grpcio-tools>=1.80.0
+protobuf>=6.33.0,<7
 
 # AI generation uses Ollama over HTTP; no local PyTorch/Transformers runtime in this container.
 
 # Linting (dev)
-ruff>=0.8.0
+ruff>=0.15.0
 
 # Testing dependencies
-pytest==8.3.4
-grpcio-testing>=1.76.0
+pytest>=9.0.0
+grpcio-testing>=1.80.0
