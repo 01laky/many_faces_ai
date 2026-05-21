@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -261,3 +262,69 @@ def test_hp_invalid_injected_snapshot_falls_back(base_env, tmp_path, monkeypatch
 
     assert profile["scope"] == "container"
     assert "injectedFromHost" not in profile.get("detection", {})
+
+
+def test_docker_desktop_windows_host_profile(base_env, monkeypatch, tmp_path):
+    host_root = tmp_path / "c"
+    system32 = host_root / "Windows" / "System32"
+    system32.mkdir(parents=True)
+    (system32 / "hostname.exe").write_bytes(b"")
+    (system32 / "WindowsPowerShell" / "v1.0").mkdir(parents=True)
+    (system32 / "WindowsPowerShell" / "v1.0" / "powershell.exe").write_bytes(b"")
+    nvidia_smi = host_root / "Windows" / "System32" / "nvidia-smi.exe"
+    nvidia_smi.write_bytes(b"")
+
+    monkeypatch.setenv("HOST_PROFILE_WINDOWS_ROOT", str(host_root))
+
+    def fake_run(executable, args, timeout):
+        name = Path(executable).name.lower()
+        if name == "hostname.exe":
+            return type("R", (), {"returncode": 0, "stdout": "WIN-PC\n", "stderr": ""})()
+        if name == "powershell.exe":
+            command = args[-1]
+            if "OSVersion" in command:
+                return type(
+                    "R",
+                    (),
+                    {
+                        "returncode": 0,
+                        "stdout": "Microsoft Windows NT 10.0.26100.0\n",
+                        "stderr": "",
+                    },
+                )()
+            if "Win32_OperatingSystem" in command and "Caption" in command:
+                return type(
+                    "R", (), {"returncode": 0, "stdout": "Microsoft Windows 11 Pro\n", "stderr": ""}
+                )()
+            if "Win32_Processor" in command and "Name" in command:
+                return type("R", (), {"returncode": 0, "stdout": "Intel Core i7\n", "stderr": ""})()
+            if "NumberOfLogicalProcessors" in command:
+                return type("R", (), {"returncode": 0, "stdout": "16\n", "stderr": ""})()
+            if "NumberOfCores" in command:
+                return type("R", (), {"returncode": 0, "stdout": "8\n", "stderr": ""})()
+            if "TotalPhysicalMemory" in command:
+                return type("R", (), {"returncode": 0, "stdout": "34359738368\n", "stderr": ""})()
+            if "FreePhysicalMemory" in command:
+                return type("R", (), {"returncode": 0, "stdout": "16777216\n", "stderr": ""})()
+        if name == "nvidia-smi.exe":
+            return type(
+                "R",
+                (),
+                {
+                    "returncode": 0,
+                    "stdout": "NVIDIA GeForce RTX 3050, 552.22, 8192\n",
+                    "stderr": "",
+                },
+            )()
+        return None
+
+    with patch("services.host_profile_collector._inside_docker", return_value=True):
+        with patch("services.host_profile_collector._run_host_executable", side_effect=fake_run):
+            from services.host_profile_collector import collect_host_hardware_snapshot
+
+            profile = collect_host_hardware_snapshot()
+
+    assert profile["scope"] == "host"
+    assert profile["hostname"] == "WIN-PC"
+    assert profile["gpu"]["devices"][0]["name"] == "NVIDIA GeForce RTX 3050"
+    assert profile["detection"]["dockerDesktopWindowsHost"] is True

@@ -19,10 +19,18 @@ import psutil
 
 COLLECTOR_VERSION = "1.0.0"
 SCHEMA_VERSION = 1
-DEFAULT_INJECTED_PATH = "/app/host_profile_injected.json"
+DEFAULT_INJECTED_PATH = "/app/injected/host_profile_injected.json"
 NVIDIA_SMI_TIMEOUT_SECONDS = 1.0
 OLLAMA_PROBE_TIMEOUT_SECONDS = 3.0
 MAX_DISK_PARTITIONS = 10
+DOCKER_DESKTOP_WINDOWS_ROOTS = (
+    "/run/desktop/mnt/host/c",
+    "/mnt/c",
+)
+DOCKER_DESKTOP_NVIDIA_SMI_RELATIVE = (
+    "Windows/System32/nvidia-smi.exe",
+    "Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe",
+)
 HOST_PROFILE_SECTIONS = (
     "schemaVersion",
     "workerInstanceId",
@@ -140,46 +148,115 @@ def _collect_cpu() -> dict[str, Any]:
     return payload
 
 
+def _env_paths(name: str) -> list[str]:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return []
+    return [part.strip() for part in raw.split(",") if part.strip()]
+
+
+def _docker_desktop_windows_root() -> str | None:
+    for candidate in _env_paths("HOST_PROFILE_WINDOWS_ROOT") + list(DOCKER_DESKTOP_WINDOWS_ROOTS):
+        hostname_exe = os.path.join(candidate, "Windows/System32/hostname.exe")
+        if os.path.isfile(hostname_exe):
+            return candidate
+    return None
+
+
+def _run_host_executable(
+    executable: str, args: list[str], timeout: float
+) -> subprocess.CompletedProcess[str] | None:
+    if not os.path.isfile(executable):
+        return None
+    try:
+        return subprocess.run(
+            [executable, *args],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+
+
+def _run_windows_powershell(host_root: str, command: str, timeout: float = 4.0) -> str | None:
+    powershell = os.path.join(host_root, "Windows/System32/WindowsPowerShell/v1.0/powershell.exe")
+    completed = _run_host_executable(
+        powershell,
+        ["-NoProfile", "-NonInteractive", "-Command", command],
+        timeout,
+    )
+    if completed is None or completed.returncode != 0:
+        return None
+    value = completed.stdout.strip()
+    return value or None
+
+
+def _nvidia_smi_candidates() -> list[str]:
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def add(path: str | None) -> None:
+        if not path:
+            return
+        normalized = os.path.abspath(path)
+        if normalized in seen:
+            return
+        seen.add(normalized)
+        candidates.append(path)
+
+    add(shutil.which("nvidia-smi"))
+    for path in _env_paths("HOST_NVIDIA_SMI_PATHS"):
+        add(path)
+    host_root = _docker_desktop_windows_root()
+    if host_root:
+        for relative in DOCKER_DESKTOP_NVIDIA_SMI_RELATIVE:
+            add(os.path.join(host_root, relative.replace("/", os.sep)))
+    return candidates
+
+
+def _query_nvidia_smi(smi: str, warnings: list[str]) -> list[dict[str, Any]]:
+    devices: list[dict[str, Any]] = []
+    completed = _run_host_executable(
+        smi,
+        [
+            "--query-gpu=name,driver_version,memory.total",
+            "--format=csv,noheader,nounits",
+        ],
+        NVIDIA_SMI_TIMEOUT_SECONDS,
+    )
+    if completed is None:
+        return devices
+    if completed.returncode == 0 and completed.stdout.strip():
+        for line in completed.stdout.splitlines():
+            parts = [part.strip() for part in line.split(",")]
+            if len(parts) < 3:
+                continue
+            name, driver, memory_mb = parts[:3]
+            try:
+                vram_bytes = int(float(memory_mb) * 1024 * 1024)
+            except ValueError:
+                vram_bytes = None
+            device: dict[str, Any] = {"name": name, "vendor": "NVIDIA"}
+            if vram_bytes is not None:
+                device["vramBytes"] = vram_bytes
+            if driver:
+                device["driverVersion"] = driver
+            devices.append(device)
+    elif completed.stderr:
+        warnings.append(f"nvidia-smi failed: {completed.stderr.strip()[:120]}")
+    return devices
+
+
 def _collect_gpu(warnings: list[str]) -> dict[str, Any]:
     devices: list[dict[str, Any]] = []
     cuda_available = False
-    smi = shutil.which("nvidia-smi")
-    if smi:
-        try:
-            completed = subprocess.run(
-                [
-                    smi,
-                    "--query-gpu=name,driver_version,memory.total",
-                    "--format=csv,noheader,nounits",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=NVIDIA_SMI_TIMEOUT_SECONDS,
-                check=False,
-            )
-            if completed.returncode == 0 and completed.stdout.strip():
-                for line in completed.stdout.splitlines():
-                    parts = [part.strip() for part in line.split(",")]
-                    if len(parts) < 3:
-                        continue
-                    name, driver, memory_mb = parts[:3]
-                    try:
-                        vram_bytes = int(float(memory_mb) * 1024 * 1024)
-                    except ValueError:
-                        vram_bytes = None
-                    device: dict[str, Any] = {"name": name, "vendor": "NVIDIA"}
-                    if vram_bytes is not None:
-                        device["vramBytes"] = vram_bytes
-                    if driver:
-                        device["driverVersion"] = driver
-                    devices.append(device)
-                cuda_available = bool(devices)
-            elif completed.stderr:
-                warnings.append(f"nvidia-smi failed: {completed.stderr.strip()[:120]}")
-        except subprocess.TimeoutExpired:
-            warnings.append("nvidia-smi timed out")
-        except OSError as exc:
-            warnings.append(f"nvidia-smi error: {exc}")
+    for smi in _nvidia_smi_candidates():
+        devices = _query_nvidia_smi(smi, warnings)
+        if devices:
+            cuda_available = True
+            break
     if not devices and sys.platform == "darwin":
         try:
             completed = subprocess.run(
@@ -199,6 +276,128 @@ def _collect_gpu(warnings: list[str]) -> dict[str, Any]:
         except (subprocess.TimeoutExpired, OSError):
             pass
     return {"devices": devices, "cudaAvailable": cuda_available}
+
+
+def _collect_docker_desktop_windows_host(warnings: list[str]) -> dict[str, Any] | None:
+    """When ai-demo-dev runs in Docker Desktop on Windows, probe the mounted C: host OS."""
+    if not _inside_docker():
+        return None
+    host_root = _docker_desktop_windows_root()
+    if not host_root:
+        return None
+
+    hostname_exe = os.path.join(host_root, "Windows/System32/hostname.exe")
+    hostname = platform.node()
+    completed = _run_host_executable(hostname_exe, [], 2.0)
+    if completed and completed.returncode == 0 and completed.stdout.strip():
+        hostname = completed.stdout.strip()
+
+    os_version = (
+        _run_windows_powershell(
+            host_root,
+            "[System.Environment]::OSVersion.VersionString",
+        )
+        or platform.version()
+    )
+    os_display = _run_windows_powershell(
+        host_root,
+        "(Get-CimInstance Win32_OperatingSystem).Caption",
+    ) or _os_display_name("Windows", os_version)
+    cpu_model = (
+        _run_windows_powershell(
+            host_root,
+            "(Get-CimInstance Win32_Processor | Select-Object -First 1 -ExpandProperty Name)",
+        )
+        or platform.processor()
+        or "unknown"
+    )
+    logical_cores_raw = _run_windows_powershell(
+        host_root,
+        "(Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors",
+    )
+    physical_cores_raw = _run_windows_powershell(
+        host_root,
+        "(Get-CimInstance Win32_Processor | Measure-Object -Property NumberOfCores -Sum).Sum",
+    )
+    try:
+        logical_cores = (
+            int(logical_cores_raw) if logical_cores_raw else psutil.cpu_count(logical=True) or 0
+        )
+    except ValueError:
+        logical_cores = psutil.cpu_count(logical=True) or 0
+    try:
+        physical_cores = (
+            int(physical_cores_raw)
+            if physical_cores_raw
+            else psutil.cpu_count(logical=False) or logical_cores
+        )
+    except ValueError:
+        physical_cores = psutil.cpu_count(logical=False) or logical_cores
+
+    ram_total_raw = _run_windows_powershell(
+        host_root,
+        "(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory",
+    )
+    ram_available_raw = _run_windows_powershell(
+        host_root,
+        "(Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory",
+    )
+    try:
+        ram_total = int(ram_total_raw) if ram_total_raw else psutil.virtual_memory().total
+    except ValueError:
+        ram_total = psutil.virtual_memory().total
+    try:
+        ram_available = (
+            int(ram_available_raw) * 1024
+            if ram_available_raw
+            else psutil.virtual_memory().available
+        )
+    except ValueError:
+        ram_available = psutil.virtual_memory().available
+
+    gpu = _collect_gpu(warnings)
+    primary_gpu = gpu["devices"][0]["name"] if gpu["devices"] else ""
+    machine_id = _machine_guid_or_boot_id()
+    os_family = "Windows"
+    worker_id = _worker_instance_id(hostname, os_family, machine_id, primary_gpu)
+
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "workerInstanceId": worker_id,
+        "scope": "host",
+        "hostname": hostname,
+        "os": {
+            "family": os_family,
+            "version": os_version,
+            "arch": platform.machine(),
+            "displayName": os_display,
+        },
+        "cpu": {
+            "logicalCores": logical_cores,
+            "physicalCores": physical_cores,
+            "modelName": cpu_model,
+        },
+        "gpu": gpu,
+        "memory": {
+            "ramTotalBytes": ram_total,
+            "ramAvailableBytes": ram_available,
+            "swapTotalBytes": 0,
+            "swapUsedBytes": 0,
+        },
+        "disks": _collect_disks(),
+        "detection": {
+            "collectorVersion": COLLECTOR_VERSION,
+            "platform": sys.platform,
+            "insideDocker": True,
+            "dockerDesktopWindowsHost": True,
+            "warnings": warnings,
+        },
+    }
+
+
+def collect_host_hardware_snapshot() -> dict[str, Any]:
+    """Collect hardware/OS snapshot without reading injected JSON or probing Ollama."""
+    return _collect_live_profile(include_ai_runtime=False)
 
 
 def _collect_disks() -> list[dict[str, Any]]:
@@ -394,9 +593,27 @@ def collect_host_profile(model_name: str | None = None) -> dict[str, Any]:
     return _collect_live_profile(model_name)
 
 
-def _collect_live_profile(model_name: str | None = None) -> dict[str, Any]:
+def _collect_live_profile(
+    model_name: str | None = None,
+    *,
+    include_ai_runtime: bool = True,
+) -> dict[str, Any]:
     """Collect hardware/OS profile from the current execution environment."""
     warnings: list[str] = []
+    docker_desktop_host = _collect_docker_desktop_windows_host(warnings)
+    if docker_desktop_host is not None:
+        profile = dict(docker_desktop_host)
+        profile["collectedAtUtc"] = (
+            datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        )
+        if include_ai_runtime:
+            configured_model = (
+                model_name or os.getenv("OLLAMA_MODEL") or "qwen2.5:7b-instruct-q4_K_M"
+            )
+            profile["aiRuntime"] = _collect_ollama_runtime(configured_model, warnings)
+            profile["detection"]["warnings"] = warnings
+        return profile
+
     scope = _resolve_scope()
     if scope == "container":
         warnings.append("Profile scope is container — GPU/RAM may be under-reported")
@@ -443,7 +660,6 @@ def _collect_live_profile(model_name: str | None = None) -> dict[str, Any]:
             "swapUsedBytes": swap.used,
         },
         "disks": _collect_disks(),
-        "aiRuntime": _collect_ollama_runtime(configured_model, warnings),
         "detection": {
             "collectorVersion": COLLECTOR_VERSION,
             "platform": sys.platform,
@@ -451,4 +667,6 @@ def _collect_live_profile(model_name: str | None = None) -> dict[str, Any]:
             "warnings": warnings,
         },
     }
+    if include_ai_runtime:
+        profile["aiRuntime"] = _collect_ollama_runtime(configured_model, warnings)
     return profile

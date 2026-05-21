@@ -8,70 +8,52 @@ The Python gRPC worker collects a **host profile** locally when the backend call
 - Ollama runtime details (`/api/tags`, `/api/show`, `/api/ps`, env `OLLAMA_NUM_CTX`, `OLLAMA_NUM_GPU`)
 - Stable `workerInstanceId` (hashed — no MAC addresses in clear text)
 
-## Docker with real host hardware (Option A)
+## Automatic collection at container start
 
-When `ai-demo-dev` runs in Docker without GPU passthrough, live collection inside the container only sees the Linux cgroup (no RTX card, container hostname). Use a **host snapshot** collected on the physical machine before `docker compose up`:
+No manual scripts are required. Every `ai-demo-dev` start/restart runs `scripts/entrypoint.sh`, which calls `scripts/refresh_host_snapshot.py` before the gRPC server starts.
 
-1. On the Windows/Mac/Linux **host** (not inside the container), run:
+Refresh order:
 
-   ```bash
-   # Mac / Linux
-   ./many_faces_ai/scripts/collect_host_snapshot.sh
+1. **Host agent (Mac / native host)** — POST `http://host.docker.internal:9765/v1/collect` when `host-profile-agent` is running on the physical machine. `start-all-dev.sh` starts this agent automatically when `ENABLE_AI=1`.
+2. **Docker Desktop Windows host probing** — when `C:` is mounted (`/run/desktop/mnt/host/c` or `/mnt/c`), the entrypoint runs `nvidia-smi.exe` and PowerShell on the Windows host (RTX 3050, real hostname, RAM).
+3. **Fallback** — container-scope profile if neither path is available.
 
-   # Windows PowerShell
-   .\many_faces_ai\scripts\collect-host-profile.ps1
-   ```
+Snapshot file (bind-mounted):
 
-   This writes `many_faces_ai/.host-profile.snapshot.json` with `scope: host`, real GPU/RAM/OS, and no stale Ollama block.
+`many_faces_ai/.host-profile-snapshot.d/host_profile_injected.json` → `/app/injected/host_profile_injected.json`
 
-2. Start or restart the AI container (snapshot is bind-mounted read-only):
-
-   ```bash
-   docker compose -f docker-compose.dev.yml up -d ai-demo-dev
-   ```
-
-   Or use the helper:
-
-   ```bash
-   ./many_faces_ai/scripts/start-ai-docker.sh   # Mac/Linux
-   .\many_faces_ai\scripts\start-ai-docker.ps1  # Windows
-   ```
-
-3. Inside the container, `collect_host_profile()` merges the injected snapshot for hardware/OS and probes Ollama live for `aiRuntime`. Admin shows **host** scope with RTX 3050 (or whatever the host script detected).
-
-`scripts/start-all-dev.sh` runs the snapshot step automatically when `ENABLE_AI=1`.
+Inside the running container, `collect_host_profile()` merges this injected snapshot with live Ollama `aiRuntime`.
 
 ## Environment
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `HOST_PROFILE_SCOPE` | `auto` | `host`, `container`, or auto-detect Docker/Kubernetes (host snapshot script forces `host`) |
-| `HOST_PROFILE_INJECTED_PATH` | `/app/host_profile_injected.json` | JSON snapshot path inside the container |
-| `HOST_PROFILE_USE_INJECTED` | auto in Docker | Set `1` to force merge outside Docker; `0` to ignore injection |
-| `HOST_PROFILE_SNAPSHOT_FILE` | `many_faces_ai/.host-profile.snapshot.json` | Output path for host-side collector scripts |
+| `HOST_PROFILE_INJECTED_PATH` | `/app/injected/host_profile_injected.json` | JSON snapshot path inside the container |
+| `HOST_PROFILE_AGENT_URL` | `http://host.docker.internal:9765` | Host-side collector HTTP endpoint |
+| `HOST_PROFILE_AGENT_PORT` | `9765` | Port for `host_profile_agent.py` on the physical machine |
+| `HOST_NVIDIA_SMI_PATHS` | — | Extra comma-separated `nvidia-smi` paths (Windows `.exe` in Docker) |
+| `HOST_PROFILE_SCOPE` | `auto` | Force `host` or `container` when building snapshots |
 | `OLLAMA_BASE_URL` | `http://host.docker.internal:11434` | Ollama HTTP API |
 | `OLLAMA_MODEL` | `qwen2.5:7b-instruct-q4_K_M` | Configured model name |
 
 ## Dev topology (Mac backend + Windows AI)
 
-1. On Windows: run `collect-host-profile.ps1`, then `start-ai-docker.ps1` (or root `start-all-dev.sh` on Mac side after snapshot on Windows).
-2. Point backend `AI_SERVICE_GRPC_ADDRESS` at the Windows host (direct IP or `host.docker.internal:50051` via socat relay).
-3. Restart the backend — startup refresh calls `GetHostProfile` and upserts PostgreSQL.
-4. Admin Settings shows the **Windows** hostname/GPU, while `grpcAddressConfigured` shows what the Mac backend used to connect.
+1. On Windows: `docker compose -f docker-compose.dev.yml up -d ai-demo-dev` — entrypoint collects RTX/host info automatically.
+2. On Mac with `start-all-dev.sh`: host agent starts automatically; entrypoint refreshes snapshot on each AI container start.
+3. Point backend `AI_SERVICE_GRPC_ADDRESS` at the Windows host IP.
+4. Restart backend — Admin Settings shows host GPU/hostname.
 
 ## grpcurl smoke test
-
-Reflection is disabled; pass the proto file explicitly:
 
 ```bash
 grpcurl -plaintext -import-path many_faces_proto/proto -proto health.proto \
   -d '{}' localhost:50051 health.HealthService/GetHostProfile
 ```
 
-Expect `"scope":"host"` and `"injectedFromHost":true` when the snapshot mount is active.
+Expect `"scope":"host"` and `"injectedFromHost":true` after a successful automatic refresh.
 
 ## Tests
 
 ```bash
-pytest tests/test_host_profile_collector.py -q
+pytest tests/test_host_profile_collector.py tests/test_host_profile_refresh.py -q
 ```

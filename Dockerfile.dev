@@ -30,12 +30,13 @@ RUN sed -i 's/^from health_pb2/from proto.health_pb2/' proto/health_pb2_grpc.py 
 # Copy application code (server + AI model service)
 COPY server.py .
 COPY services/ services/
+COPY scripts/ scripts/
 
 # Create proto/__init__.py if it doesn't exist (allows proto to be imported as package)
 RUN touch proto/__init__.py || true
 
-# Make server.py executable
-RUN chmod +x server.py
+# Make scripts executable
+RUN chmod +x server.py scripts/entrypoint.sh
 
 # Expose gRPC port (default 50051)
 EXPOSE 50051
@@ -43,6 +44,5 @@ EXPOSE 50051
 # Set default environment variables
 ENV PORT=50051
 
-# Run the server
-# Use python -m to run as module, which ensures proper path handling
-CMD ["python", "-m", "server"]
+# Run the server (entrypoint refreshes host profile snapshot first)
+ENTRYPOINT ["/app/scripts/entrypoint.sh"]

@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-OUT="${HOST_PROFILE_SNAPSHOT_FILE:-$ROOT/.host-profile.snapshot.json}"
+OUT="${HOST_PROFILE_SNAPSHOT_FILE:-$ROOT/.host-profile-snapshot.d/host_profile_injected.json}"
 
 if [ -x "$ROOT/.venv/bin/python" ]; then
   PY="$ROOT/.venv/bin/python"
