@@ -191,13 +191,32 @@ def _run_windows_docker_powershell(win_root: str, output: Path) -> bool:
 def _run_python_fallback(output: Path) -> bool:
     os.environ.setdefault("HOST_PROFILE_SCOPE", "host")
     snapshot = build_host_snapshot()
+    if not _is_valid_host_snapshot(snapshot):
+        if output.is_file():
+            output.unlink(missing_ok=True)
+        return False
     write_host_snapshot(output, snapshot)
-    return _validate_snapshot(output)
+    return True
+
+
+def _on_windows_docker_host() -> bool:
+    if os.getenv("MFAI_REPO_ROOT_WINDOWS", "").strip():
+        return True
+    if _windows_repo_root_from_mountinfo():
+        return True
+    for root in HOST_C_ROOTS:
+        if (Path(root) / "Windows" / "System32" / "hostname.exe").is_file():
+            return True
+    return False
 
 
 def main() -> int:
     output = _snapshot_path()
     output.parent.mkdir(parents=True, exist_ok=True)
+
+    if output.is_file() and not _validate_snapshot(output):
+        print(f"Removing stale invalid host profile snapshot at {output}")
+        output.unlink(missing_ok=True)
 
     if _validate_snapshot(output):
         print(f"Host profile snapshot already valid at {output}")
@@ -222,8 +241,16 @@ def main() -> int:
         print(f"Host profile snapshot ready at {output} (local collector)")
         return 0
 
+    if _on_windows_docker_host():
+        print(
+            "ERROR: Windows host profile snapshot missing. Run .\\scripts\\up-ai-windows.ps1 "
+            "from the monorepo root on the Windows PC (collects hardware before compose).",
+            file=sys.stderr,
+        )
+        return 1
+
     print(
-        "Host profile snapshot is missing or still container-scoped; ai-demo-dev will start anyway.",
+        "Host profile snapshot unavailable; ai-demo-dev may report container scope.",
         file=sys.stderr,
     )
     return 0
