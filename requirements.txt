@@ -2,6 +2,7 @@
 grpcio>=1.80.0
 grpcio-tools>=1.80.0
 protobuf>=6.33.0,<7
+psutil>=7.0.0
 
 # AI generation uses Ollama over HTTP; no local PyTorch/Transformers runtime in this container.
 

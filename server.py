@@ -174,12 +174,16 @@ except (ImportError, ModuleNotFoundError, FileNotFoundError) as e:
 # Import AI model service - gRPC adapter that calls local Ollama
 try:
     from services.ai_model_service import AIModelService
+    from services.host_profile_collector import collect_host_profile
 
     _ai_service = AIModelService()
     logger.info("AIModelService ready (Ollama model checked on health/preload)")
 except ImportError as e:
     logger.warning("AIModelService not available: %s – Generate RPC will not work", e)
     _ai_service = None
+
+    def collect_host_profile(_model_name=None):  # type: ignore[misc]
+        return {}
 
 
 def _model_status_payload() -> dict:
@@ -243,6 +247,21 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
             status="success",
             message=json.dumps(status),
         )
+
+    def GetHostProfile(self, request, context):
+        """Return a JSON host hardware/OS snapshot collected on this machine."""
+        logger.info("GetHostProfile requested")
+        try:
+            model_name = _ai_service.model_name if _ai_service is not None else None
+            profile = collect_host_profile(model_name)
+            if not profile:
+                return health_pb2.HostProfileResponse(error="collection failed")
+            return health_pb2.HostProfileResponse(
+                json_body=json.dumps(profile, ensure_ascii=False),
+            )
+        except Exception as exc:
+            logger.exception("GetHostProfile failed: %s", exc)
+            return health_pb2.HostProfileResponse(error=str(exc))
 
     def Generate(self, request, context):
         """

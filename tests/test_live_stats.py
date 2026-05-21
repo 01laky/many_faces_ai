@@ -1,7 +1,5 @@
-import pytest
-
 from live_stats_planner import parse_planner_indices, salvage_json_object
-from live_stats_stitch import stitch_bundle_answers, StitchedPart
+from live_stats_stitch import StitchedPart, stitch_bundle_answers
 
 
 class TestPlannerParse:

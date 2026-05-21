@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable, List
 
 
 @dataclass(frozen=True)
@@ -20,7 +20,7 @@ def stitch_bundle_answers(parts: Iterable[StitchedPart]) -> str:
     if not ordered:
         return "No statistics data was available to answer this question."
 
-    blocks: List[str] = []
+    blocks: list[str] = []
     for part in ordered:
         if part.failed:
             blocks.append(f"**{part.bundle_id}:** Data unavailable for this bundle.")

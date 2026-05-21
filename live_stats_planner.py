@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-from typing import List
 
 _FENCE = re.compile(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", re.IGNORECASE)
 
@@ -27,7 +26,7 @@ def parse_planner_indices(
     catalog_length: int,
     max_selected: int,
     metrics_like: bool = True,
-) -> List[int]:
+) -> list[int]:
     """Parse planner indices; fallback [0] when metrics-like and parse fails."""
     raw = salvage_json_object(model_output)
     try:
