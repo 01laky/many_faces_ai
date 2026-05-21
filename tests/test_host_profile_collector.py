@@ -184,3 +184,80 @@ def test_ollama_http_probe_integration(base_env, monkeypatch):
     assert runtime["ollamaNumGpu"] == 999
     assert runtime["ollamaModelDetail"]["parameterSize"] == "7.6B"
     json.dumps(profile)
+
+
+def test_hp_injected_snapshot_merges_host_gpu(base_env, tmp_path, monkeypatch):
+    injected_path = tmp_path / "host_profile_injected.json"
+    injected = {
+        "schemaVersion": 1,
+        "workerInstanceId": "sha256:abc123",
+        "collectedAtUtc": "2026-05-21T10:00:00Z",
+        "scope": "host",
+        "hostname": "win-gaming-pc",
+        "os": {
+            "family": "Windows",
+            "version": "10.0.26100",
+            "arch": "AMD64",
+            "displayName": "Windows 10.0.26100",
+        },
+        "cpu": {"logicalCores": 16, "physicalCores": 8, "modelName": "Intel Core i7"},
+        "gpu": {
+            "devices": [
+                {
+                    "name": "NVIDIA GeForce RTX 3050",
+                    "vendor": "NVIDIA",
+                    "vramBytes": 8 * 1024 * 1024 * 1024,
+                    "driverVersion": "552.22",
+                }
+            ],
+            "cudaAvailable": True,
+        },
+        "memory": {
+            "ramTotalBytes": 32 * 1024 * 1024 * 1024,
+            "ramAvailableBytes": 16 * 1024 * 1024 * 1024,
+            "swapTotalBytes": 0,
+            "swapUsedBytes": 0,
+        },
+        "disks": [{"mountPoint": "C:\\", "totalBytes": 1000, "freeBytes": 500, "fsType": "NTFS"}],
+        "detection": {"capturedOnHost": True, "insideDocker": False, "warnings": []},
+    }
+    injected_path.write_text(json.dumps(injected), encoding="utf-8")
+    monkeypatch.setenv("HOST_PROFILE_INJECTED_PATH", str(injected_path))
+    monkeypatch.setenv("HOST_PROFILE_USE_INJECTED", "1")
+
+    runtime = {
+        "ollamaReachable": True,
+        "ollamaModelConfigured": "demo-model",
+        "ollamaNumGpu": 0,
+    }
+    with patch("services.host_profile_collector._inside_docker", return_value=True):
+        with patch("services.host_profile_collector._collect_ollama_runtime", return_value=runtime):
+            profile = collect_host_profile()
+
+    assert profile["scope"] == "host"
+    assert profile["hostname"] == "win-gaming-pc"
+    assert profile["gpu"]["devices"][0]["name"] == "NVIDIA GeForce RTX 3050"
+    assert profile["aiRuntime"]["ollamaReachable"] is True
+    assert profile["detection"]["injectedFromHost"] is True
+    assert profile["detection"]["insideDocker"] is True
+    assert profile["detection"]["hostSnapshotAtUtc"] == "2026-05-21T10:00:00Z"
+
+
+def test_hp_invalid_injected_snapshot_falls_back(base_env, tmp_path, monkeypatch):
+    injected_path = tmp_path / "host_profile_injected.json"
+    injected_path.write_text('{"schemaVersion":1,"scope":"container"}', encoding="utf-8")
+    monkeypatch.setenv("HOST_PROFILE_INJECTED_PATH", str(injected_path))
+    monkeypatch.setenv("HOST_PROFILE_USE_INJECTED", "1")
+    monkeypatch.setenv("HOST_PROFILE_SCOPE", "container")
+
+    with patch("services.host_profile_collector._inside_docker", return_value=True):
+        with patch(
+            "services.host_profile_collector._collect_gpu",
+            return_value={"devices": [], "cudaAvailable": False},
+        ):
+            with patch("services.host_profile_collector._collect_ollama_runtime") as ollama:
+                ollama.return_value = {"ollamaReachable": False}
+                profile = collect_host_profile()
+
+    assert profile["scope"] == "container"
+    assert "injectedFromHost" not in profile.get("detection", {})

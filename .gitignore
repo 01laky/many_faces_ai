@@ -21,6 +21,9 @@ proto/*_pb2_grpc.py
 .env.local
 .env.*.local
 
+# Host hardware snapshot for Docker injection (generated on the physical machine)
+.host-profile.snapshot.json
+
 # IDE
 .vscode/
 .idea/

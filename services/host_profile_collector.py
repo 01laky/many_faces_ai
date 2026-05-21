@@ -19,9 +19,21 @@ import psutil
 
 COLLECTOR_VERSION = "1.0.0"
 SCHEMA_VERSION = 1
+DEFAULT_INJECTED_PATH = "/app/host_profile_injected.json"
 NVIDIA_SMI_TIMEOUT_SECONDS = 1.0
 OLLAMA_PROBE_TIMEOUT_SECONDS = 3.0
 MAX_DISK_PARTITIONS = 10
+HOST_PROFILE_SECTIONS = (
+    "schemaVersion",
+    "workerInstanceId",
+    "scope",
+    "hostname",
+    "os",
+    "cpu",
+    "gpu",
+    "memory",
+    "disks",
+)
 
 
 def _env_int(name: str) -> int | None:
@@ -238,6 +250,70 @@ def _http_post_json(url: str, payload: dict[str, Any], timeout: float) -> dict[s
         return None
 
 
+def _injected_profile_path() -> str:
+    return (os.getenv("HOST_PROFILE_INJECTED_PATH") or DEFAULT_INJECTED_PATH).strip()
+
+
+def _is_valid_host_snapshot(data: Any) -> bool:
+    if not isinstance(data, dict):
+        return False
+    if data.get("schemaVersion") != SCHEMA_VERSION:
+        return False
+    if data.get("scope") != "host":
+        return False
+    if not data.get("hostname"):
+        return False
+    for key in ("os", "cpu", "gpu", "memory"):
+        if key not in data:
+            return False
+    return True
+
+
+def _load_injected_snapshot() -> dict[str, Any] | None:
+    if os.getenv("HOST_PROFILE_USE_INJECTED", "").strip().lower() in ("0", "false", "no"):
+        return None
+    path = _injected_profile_path()
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not _is_valid_host_snapshot(payload):
+        return None
+    return payload
+
+
+def _merge_injected_with_runtime(
+    injected: dict[str, Any],
+    model_name: str | None,
+) -> dict[str, Any]:
+    warnings: list[str] = list((injected.get("detection") or {}).get("warnings") or [])
+    configured_model = model_name or os.getenv("OLLAMA_MODEL") or "qwen2.5:7b-instruct-q4_K_M"
+    profile: dict[str, Any] = {
+        key: injected[key] for key in HOST_PROFILE_SECTIONS if key in injected
+    }
+    profile["collectedAtUtc"] = (
+        datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    )
+    profile["scope"] = "host"
+    profile["aiRuntime"] = _collect_ollama_runtime(configured_model, warnings)
+    injected_detection = (
+        injected.get("detection") if isinstance(injected.get("detection"), dict) else {}
+    )
+    profile["detection"] = {
+        **injected_detection,
+        "collectorVersion": COLLECTOR_VERSION,
+        "platform": sys.platform,
+        "insideDocker": _inside_docker(),
+        "injectedFromHost": True,
+        "hostSnapshotAtUtc": injected.get("collectedAtUtc"),
+        "warnings": warnings,
+    }
+    return profile
+
+
 def _collect_ollama_runtime(model_name: str, warnings: list[str]) -> dict[str, Any]:
     base = _ollama_base_url()
     runtime: dict[str, Any] = {
@@ -311,6 +387,15 @@ def _collect_ollama_runtime(model_name: str, warnings: list[str]) -> dict[str, A
 
 def collect_host_profile(model_name: str | None = None) -> dict[str, Any]:
     """Build the host profile JSON document returned by GetHostProfile."""
+    injected = _load_injected_snapshot()
+    if injected is not None and (_inside_docker() or os.getenv("HOST_PROFILE_USE_INJECTED") == "1"):
+        return _merge_injected_with_runtime(injected, model_name)
+
+    return _collect_live_profile(model_name)
+
+
+def _collect_live_profile(model_name: str | None = None) -> dict[str, Any]:
+    """Collect hardware/OS profile from the current execution environment."""
     warnings: list[str] = []
     scope = _resolve_scope()
     if scope == "container":
