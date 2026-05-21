@@ -30,7 +30,7 @@ PYEXE="$VENVDIR/bin/python"
 echo "🔍 many_faces_ai verify-ci (python: $PY)..."
 "$PIP" install -q --upgrade pip setuptools wheel
 # Pinned set with wheels for Python 3.11–3.13 (1.60.x often fails to build on 3.13).
-"$PIP" install -q ruff pytest \
+"$PIP" install -q ruff pytest psutil \
   grpcio==1.68.1 \
   grpcio-tools==1.68.1 \
   grpcio-testing==1.68.1 \
@@ -46,6 +46,6 @@ fi
 "$VENVDIR/bin/ruff" check .
 "$VENVDIR/bin/ruff" format --check .
 
-PYTHONPATH="$ROOT" "$VENVDIR/bin/pytest" test_server.py -q
+PYTHONPATH="$ROOT" "$VENVDIR/bin/pytest" test_server.py tests/ -q
 
 echo "✅ many_faces_ai verify-ci passed"

@@ -23,7 +23,8 @@ jobs:
       - name: Install tooling and gRPC deps (no torch)
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          python -m pip install ruff pytest grpcio==1.68.1 grpcio-tools==1.68.1 protobuf==5.28.3 grpcio-testing==1.68.1
+          python -m pip install -r requirements.txt
+          python -m pip install grpcio==1.68.1 grpcio-tools==1.68.1 protobuf==5.28.3 grpcio-testing==1.68.1
 
       - name: Generate protobuf / gRPC stubs
         run: python -m grpc_tools.protoc -I many_faces_proto/proto --python_out=proto --grpc_python_out=proto health.proto
@@ -36,4 +37,4 @@ jobs:
       - name: Unit tests
         env:
           PYTHONPATH: ${{ github.workspace }}
-        run: pytest test_server.py -q
+        run: pytest test_server.py tests/ -q
