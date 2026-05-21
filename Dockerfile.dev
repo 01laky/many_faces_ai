@@ -35,8 +35,9 @@ COPY scripts/ scripts/
 # Create proto/__init__.py if it doesn't exist (allows proto to be imported as package)
 RUN touch proto/__init__.py || true
 
-# Make scripts executable
-RUN chmod +x server.py scripts/entrypoint.sh
+# Windows build context may ship CRLF shell scripts — normalize before exec.
+RUN sed -i 's/\r$//' scripts/*.sh 2>/dev/null || true \
+    && chmod +x server.py scripts/entrypoint.sh
 
 # Expose gRPC port (default 50051)
 EXPOSE 50051
@@ -45,4 +46,4 @@ EXPOSE 50051
 ENV PORT=50051
 
 # Run the server (entrypoint refreshes host profile snapshot first)
-ENTRYPOINT ["/app/scripts/entrypoint.sh"]
+ENTRYPOINT ["sh", "/app/scripts/entrypoint.sh"]
