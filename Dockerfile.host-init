@@ -1,0 +1,10 @@
+# One-shot init image: collect host hardware before ai-demo-dev starts.
+FROM docker:27-cli
+
+RUN apk add --no-cache python3 py3-pip \
+    && pip3 install --no-cache-dir psutil==7.0.0
+
+WORKDIR /workspace
+
+# run_host_profile_init.py imports services/* from the bind-mounted repo at runtime.
+CMD ["python3", "/workspace/scripts/run_host_profile_init.py"]

@@ -8,20 +8,27 @@ The Python gRPC worker collects a **host profile** locally when the backend call
 - Ollama runtime details (`/api/tags`, `/api/show`, `/api/ps`, env `OLLAMA_NUM_CTX`, `OLLAMA_NUM_GPU`)
 - Stable `workerInstanceId` (hashed — no MAC addresses in clear text)
 
-## Windows AI-only machine
+## Automatic collection at container start
 
-On a Windows PC that runs **only** the AI worker, Linux Docker cannot execute `nvidia-smi.exe` or read real GPU/RAM from inside the container. Use the Windows host collector before starting the container:
+`docker compose up ai-demo-dev` starts a one-shot **`ai-host-profile-init`** service first (`depends_on: service_completed_successfully`). It collects hardware into `.host-profile-snapshot.d/host_profile_injected.json`, then `ai-demo-dev` starts and merges that snapshot with live Ollama data.
+
+On **Windows** (AI-only machine), init tries in order:
+
+1. Existing valid snapshot on the bind mount
+2. Mac host agent (`host.docker.internal:9765`) when present
+3. Windows PowerShell via mounted `C:\` (with `docker-compose.ai-windows.yml`)
+4. One-shot **Windows PowerShell container** via `/var/run/docker.sock` (uses the repo path from `/proc/mountinfo`)
+5. Linux fallback collector (container scope — last resort)
+
+`ai-demo-dev` entrypoint re-runs the same init logic on **restart** if the snapshot is missing or invalid.
+
+Windows AI (recommended second compose file for `C:` mount):
 
 ```powershell
-cd many_faces_ai
-.\scripts\start-ai-docker.ps1
+docker compose -f docker-compose.dev.yml -f docker-compose.ai-windows.yml up -d --build ai-demo-dev
 ```
 
-This runs `collect_windows_host_profile.ps1` on Windows (RTX, hostname, RAM), writes `.host-profile-snapshot.d/host_profile_injected.json`, then `docker compose -f ../docker-compose.dev.yml -f ../docker-compose.ai-windows.yml up -d --build ai-demo-dev`.
-
-After restart, refresh the Mac backend (`docker compose restart be-demo-dev`) so Admin loads the new profile.
-
-## Automatic collection at container start
+Or `./many_faces_ai/scripts/start-ai-docker.ps1` (same compose files).
 
 No manual scripts are required. Every `ai-demo-dev` start/restart runs `scripts/entrypoint.sh`, which calls `scripts/refresh_host_snapshot.py` before the gRPC server starts.
 
