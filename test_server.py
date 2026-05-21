@@ -404,6 +404,13 @@ class TestGenerateWithStatsContext:
         assert "prompt is required" in resp.error
         mock_ai.generate.assert_not_called()
 
+    def test_stats_context_prefix_keeps_backend_separator_contract(self):
+        prefix = server._stats_context_prefix('{"dashboard":{"usersCount":7}}')
+
+        assert prefix.startswith("[Operator platform statistics JSON")
+        assert '"usersCount":7' in prefix
+        assert prefix.endswith("\n\n---\n\n")
+
 
 class TestFetchPublicStats:
     @pytest.fixture
@@ -432,6 +439,13 @@ class TestFetchPublicStats:
             resp = servicer.FetchPublicStats(req, mock_context)
             assert resp.json_body == ""
             assert "http" in resp.error.lower()
+
+    def test_insecure_tls_bypass_is_loopback_only(self):
+        assert server._allow_insecure_tls_for_host("localhost")
+        assert server._allow_insecure_tls_for_host("127.0.0.1")
+        assert server._allow_insecure_tls_for_host("::1")
+        assert not server._allow_insecure_tls_for_host("api.example.com")
+        assert not server._allow_insecure_tls_for_host("localhost.example.com")
 
 
 class TestOperatorStatsChat:
@@ -478,6 +492,16 @@ class TestOperatorStatsChat:
         resp = servicer.OperatorStatsChat(req, mock_context)
         assert resp.text == ""
         assert resp.error
+
+    def test_compose_prompt_preserves_existing_history_and_latest_user_turn(self):
+        composed = server._compose_operator_chat_prompt("User: hi\nAI: hello", "Summarize")
+
+        assert composed == "User: hi\nAI: hello\nUser: Summarize\nAI:"
+
+    def test_compose_prompt_does_not_add_extra_newline_when_history_already_has_one(self):
+        composed = server._compose_operator_chat_prompt("User: hi\nAI: hello\n", "Next")
+
+        assert composed == "User: hi\nAI: hello\nUser: Next\nAI:"
 
 
 class TestServerIntegration:
