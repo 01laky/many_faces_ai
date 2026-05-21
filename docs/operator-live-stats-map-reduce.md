@@ -4,13 +4,13 @@ Canonical reference for **admin operator AI `live` stats mode** (map-reduce over
 
 ## Architecture (Option B — backend orchestrator)
 
-| Stage | Where | What |
-| --- | --- | --- |
-| 1 | **Backend** (`OperatorAiLiveStatsPrefetcher`) | Prefetch **all 61** entity bundles — **Redis L2 cache-aside** + DB on miss (**not** LLM) |
-| 2 | **Backend + `Generate` gRPC** | Planner LLM call returns JSON `{"indices":[...]}` (skipped for broad-overview questions) |
-| 3 | **Backend** | Per-index barrier — wait until bundle JSON ready |
-| 4 | **Backend + `Generate` gRPC** | Queued per-bundle AI (max **N** parallel, default **2**) |
-| 5 | **Backend** (`OperatorAiLiveStatsStitch`) | Deterministic stitch → one operator reply (optional AI synthesis) |
+| Stage | Where                                         | What                                                                                     |
+| ----- | --------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| 1     | **Backend** (`OperatorAiLiveStatsPrefetcher`) | Prefetch **all 61** entity bundles — **Redis L2 cache-aside** + DB on miss (**not** LLM) |
+| 2     | **Backend + `Generate` gRPC**                 | Planner LLM call returns JSON `{"indices":[...]}` (skipped for broad-overview questions) |
+| 3     | **Backend**                                   | Per-index barrier — wait until bundle JSON ready                                         |
+| 4     | **Backend + `Generate` gRPC**                 | Queued per-bundle AI (max **N** parallel, default **2**)                                 |
+| 5     | **Backend** (`OperatorAiLiveStatsStitch`)     | Deterministic stitch → one operator reply (optional AI synthesis)                        |
 
 **Gate:** `OperatorAiStatsIntent.IsMetricsQuestion` — non-metrics **`live`** messages skip stages 1–5 and use plain **`Generate`**.
 
@@ -77,12 +77,12 @@ flowchart TB
     DB --> TTL
 ```
 
-| Item | Value |
-| --- | --- |
-| Key prefix | `bedemo:operator-ai:live-bundle:v{catalogVersion}:idx:{index}` |
-| Lock prefix | `bedemo:operator-ai:live-bundle:lock:v…` |
-| Default TTL | 300_000 ms (5 min), Admin-configurable |
-| Job queue keys | `bedemo:jobs:*` — **separate namespace** |
+| Item           | Value                                                          |
+| -------------- | -------------------------------------------------------------- |
+| Key prefix     | `bedemo:operator-ai:live-bundle:v{catalogVersion}:idx:{index}` |
+| Lock prefix    | `bedemo:operator-ai:live-bundle:lock:v…`                       |
+| Default TTL    | 300_000 ms (5 min), Admin-configurable                         |
+| Job queue keys | `bedemo:jobs:*` — **separate namespace**                       |
 
 ## Key backend types
 
@@ -106,7 +106,7 @@ flowchart TB
 
 Admin browser:
 
-- `localStorage` **`admin_ai_live_max_parallel_bundle_calls`** (1–8)
+- Server-backed **`/admin/api/operator-ai/public-stats-settings`** (`liveMaxParallelBundleCalls`, 1–8)
 - **Cache TTL** — server DB via Settings → **`PUT /admin/api/operator-ai/live-stats-cache`**
 
 ## Tests

@@ -1,5 +1,26 @@
 # Many Faces AI service - gRPC Server
 
+**Local AI adapter for the Many Faces platform.** This Python service exposes the gRPC surface that the backend uses for operator chat generation, live statistics prompts, AI-assisted content review, and AI worker host profiling. The model itself runs in **Ollama on the host**; the container stays lightweight.
+
+| Start here       | Link                                                                                 |
+| ---------------- | ------------------------------------------------------------------------------------ |
+| Run standalone   | `./scripts/start-dev.sh`                                                             |
+| Full stack       | `../scripts/start-all-dev.sh` from `many_faces_main`                                 |
+| gRPC port        | `localhost:50051`                                                                    |
+| Live stats guide | [`docs/operator-live-stats-map-reduce.md`](./docs/operator-live-stats-map-reduce.md) |
+
+```mermaid
+flowchart LR
+    be["many_faces_backend<br/>IAiGrpcService"] --> grpc["many_faces_ai<br/>Python gRPC"]
+    grpc --> ollama["Ollama host<br/>chat completion"]
+    be -->|"operator chat"| gen["Generate"]
+    be -->|"moderation jobs"| review["ReviewContent"]
+    be -->|"settings panel"| profile["GetHostProfile"]
+    gen --> grpc
+    review --> grpc
+    profile --> grpc
+```
+
 Python **gRPC adapter** providing **health checks**, optional **Ollama-backed text generation** (**`Generate`** with optional **`stats_context_json`**), **public JSON fetch** (**`FetchPublicStats`**), **operator stats chat** (**`OperatorStatsChat`**), and structured **`ReviewContent`** responses for the user-content moderation pipeline used by **many_faces_backend** (`many_faces_backend/`).
 
 ## Documentation in this repo
