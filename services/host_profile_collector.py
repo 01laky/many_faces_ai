@@ -44,6 +44,11 @@ HOST_PROFILE_SECTIONS = (
 )
 
 
+def _looks_like_container_id(hostname: str) -> bool:
+    value = (hostname or "").strip().lower()
+    return len(value) == 12 and all(ch in "0123456789abcdef" for ch in value)
+
+
 def _env_int(name: str) -> int | None:
     raw = os.getenv(name, "").strip()
     if not raw:
@@ -462,6 +467,15 @@ def _is_valid_host_snapshot(data: Any) -> bool:
         return False
     if not data.get("hostname"):
         return False
+    if _looks_like_container_id(str(data.get("hostname"))):
+        return False
+    detection = data.get("detection") if isinstance(data.get("detection"), dict) else {}
+    if detection.get("capturedOnWindowsHost") is True:
+        return True
+    if detection.get("capturedOnHost") is True and not detection.get("insideDocker"):
+        return True
+    if detection.get("dockerDesktopWindowsHost") is True:
+        return True
     for key in ("os", "cpu", "gpu", "memory"):
         if key not in data:
             return False

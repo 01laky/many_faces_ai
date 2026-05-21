@@ -264,6 +264,40 @@ def test_hp_invalid_injected_snapshot_falls_back(base_env, tmp_path, monkeypatch
     assert "injectedFromHost" not in profile.get("detection", {})
 
 
+def test_hp_rejects_container_hostname_snapshot(base_env, tmp_path, monkeypatch):
+    injected_path = tmp_path / "host_profile_injected.json"
+    injected = {
+        "schemaVersion": 1,
+        "scope": "host",
+        "hostname": "f5dc90686eb8",
+        "os": {"family": "Linux", "version": "1", "arch": "amd64", "displayName": "Linux"},
+        "cpu": {"logicalCores": 1, "physicalCores": 1, "modelName": "fake"},
+        "gpu": {"devices": [], "cudaAvailable": False},
+        "memory": {
+            "ramTotalBytes": 1,
+            "ramAvailableBytes": 1,
+            "swapTotalBytes": 0,
+            "swapUsedBytes": 0,
+        },
+    }
+    injected_path.write_text(json.dumps(injected), encoding="utf-8")
+    monkeypatch.setenv("HOST_PROFILE_INJECTED_PATH", str(injected_path))
+    monkeypatch.setenv("HOST_PROFILE_USE_INJECTED", "1")
+    monkeypatch.setenv("HOST_PROFILE_SCOPE", "container")
+
+    with patch("services.host_profile_collector._inside_docker", return_value=True):
+        with patch(
+            "services.host_profile_collector._collect_gpu",
+            return_value={"devices": [], "cudaAvailable": False},
+        ):
+            with patch("services.host_profile_collector._collect_ollama_runtime") as ollama:
+                ollama.return_value = {"ollamaReachable": False}
+                profile = collect_host_profile()
+
+    assert profile["scope"] == "container"
+    assert "injectedFromHost" not in profile.get("detection", {})
+
+
 def test_docker_desktop_windows_host_profile(base_env, monkeypatch, tmp_path):
     host_root = tmp_path / "c"
     system32 = host_root / "Windows" / "System32"

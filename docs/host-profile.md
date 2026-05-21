@@ -8,6 +8,19 @@ The Python gRPC worker collects a **host profile** locally when the backend call
 - Ollama runtime details (`/api/tags`, `/api/show`, `/api/ps`, env `OLLAMA_NUM_CTX`, `OLLAMA_NUM_GPU`)
 - Stable `workerInstanceId` (hashed — no MAC addresses in clear text)
 
+## Windows AI-only machine
+
+On a Windows PC that runs **only** the AI worker, Linux Docker cannot execute `nvidia-smi.exe` or read real GPU/RAM from inside the container. Use the Windows host collector before starting the container:
+
+```powershell
+cd many_faces_ai
+.\scripts\start-ai-docker.ps1
+```
+
+This runs `collect_windows_host_profile.ps1` on Windows (RTX, hostname, RAM), writes `.host-profile-snapshot.d/host_profile_injected.json`, then `docker compose -f ../docker-compose.dev.yml -f ../docker-compose.ai-windows.yml up -d --build ai-demo-dev`.
+
+After restart, refresh the Mac backend (`docker compose restart be-demo-dev`) so Admin loads the new profile.
+
 ## Automatic collection at container start
 
 No manual scripts are required. Every `ai-demo-dev` start/restart runs `scripts/entrypoint.sh`, which calls `scripts/refresh_host_snapshot.py` before the gRPC server starts.

@@ -56,6 +56,17 @@ def _try_agent_collect(output: Path, timeout: float = 8.0) -> dict | None:
 
 def refresh_host_snapshot(output: Path) -> dict:
     """Return a host-scope snapshot, preferring the host-side agent when reachable."""
+    if output.is_file():
+        try:
+            existing = json.loads(output.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            existing = None
+        else:
+            from services.host_profile_collector import _is_valid_host_snapshot
+
+            if isinstance(existing, dict) and _is_valid_host_snapshot(existing):
+                return existing
+
     agent_snapshot = _try_agent_collect(output)
     if agent_snapshot is not None and agent_snapshot.get("scope") == "host":
         write_host_snapshot(output, agent_snapshot)
@@ -65,6 +76,11 @@ def refresh_host_snapshot(output: Path) -> dict:
     snapshot = build_host_snapshot()
     write_host_snapshot(output, snapshot)
     return snapshot
+
+
+def _looks_like_container_id(hostname: str) -> bool:
+    value = (hostname or "").strip().lower()
+    return len(value) == 12 and all(ch in "0123456789abcdef" for ch in value)
 
 
 def main() -> int:
@@ -83,7 +99,12 @@ def main() -> int:
     print(f"  hostname: {snapshot.get('hostname')}")
     print(f"  scope: {snapshot.get('scope')}")
     print(f"  gpu: {gpu_label}")
-    return 0 if snapshot.get("scope") == "host" else 1
+    return (
+        0
+        if snapshot.get("scope") == "host"
+        and not _looks_like_container_id(str(snapshot.get("hostname", "")))
+        else 1
+    )
 
 
 if __name__ == "__main__":
