@@ -15,6 +15,11 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from bootstrap import ensure_repo_root_on_path  # noqa: E402
+
+ensure_repo_root_on_path()
+
+from services.host_profile_collector import _looks_like_container_id  # noqa: E402
 from services.host_profile_snapshot import build_host_snapshot, write_host_snapshot  # noqa: E402
 
 
@@ -85,11 +90,6 @@ def refresh_host_snapshot(output: Path) -> dict:
         )
     write_host_snapshot(output, snapshot)
     return snapshot
-
-
-def _looks_like_container_id(hostname: str) -> bool:
-    value = (hostname or "").strip().lower()
-    return len(value) == 12 and all(ch in "0123456789abcdef" for ch in value)
 
 
 def main() -> int:

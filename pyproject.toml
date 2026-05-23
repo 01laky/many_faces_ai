@@ -21,5 +21,8 @@ ignore = [
     "E501",  # line too long (handled by black)
 ]
 
+[tool.ruff.lint.per-file-ignores]
+"server.py" = ["I001"]  # late imports after sys.path / proto bootstrap
+
 [tool.ruff.lint.isort]
-known-first-party = ["proto"]
+known-first-party = ["proto", "services", "utils", "bootstrap", "moderation_input_sanitize"]

@@ -14,9 +14,7 @@ Usage:
 import json
 import logging
 import os
-import re
 import sys
-import uuid
 from concurrent import futures
 
 import grpc
@@ -53,88 +51,6 @@ logger.debug(f"Python path: {sys.path[:3]}")
 logger.debug(f"Current directory: {os.getcwd()}")
 logger.debug(f"App directory: {app_dir}")
 
-TEXT_POLICY_TERMS = {
-    "spam": {"spam", "giveaway", "free money", "cheap followers"},
-    "scam": {"scam", "crypto doubling", "wire transfer", "investment guaranteed"},
-    "phishing": {"phishing", "password reset link", "verify your account", "login now"},
-    "hate": {"hate", "slur", "racist"},
-    "harassment": {"harass", "bully", "doxx"},
-    "adult": {"adult", "porn", "nsfw", "sexual"},
-    "violence": {"violence", "kill", "weapon", "blood"},
-    "self_harm": {"self harm", "suicide", "hurt myself"},
-    "copyright": {"pirated", "leaked movie", "copyright bypass"},
-}
-
-SUPPORTED_MEDIA_EXTENSIONS = {
-    ".jpg",
-    ".jpeg",
-    ".png",
-    ".webp",
-    ".gif",
-    ".mp4",
-    ".webm",
-    ".mov",
-}
-
-
-def _stats_context_prefix(stats_json: str) -> str:
-    """Return the backend statistics block prepended to operator chat prompts."""
-    return (
-        "[Operator platform statistics JSON — authoritative DB snapshot at snapshotUtc. "
-        "Use dashboard.* for totals and timeseriesLast7Days.series for 7-day daily trends. "
-        "NOT for clock/time — use Live context server time. Do NOT invent fields.]\n"
-        + stats_json
-        + "\n\n---\n\n"
-    )
-
-
-def _compose_operator_chat_prompt(history_text: str, user_message: str) -> str:
-    """Build the transcript shape consumed by AIModelService._parse_prompt."""
-    parts: list[str] = []
-    if history_text.strip():
-        # Trim persisted history for stable prompt size, then add exactly one separator
-        # before the latest user turn. Without this, already-newline-terminated history
-        # could be stripped and joined as "AI: previousUser: latest".
-        parts.append(history_text.strip())
-        parts.append("\n")
-    parts.append("User: ")
-    parts.append(user_message)
-    parts.append("\nAI:")
-    return "".join(parts)
-
-
-def _allow_insecure_tls_for_host(host: str) -> bool:
-    """Only local dev loopback hosts may bypass certificate validation for stats fetches."""
-    return host.lower() in ("localhost", "127.0.0.1", "::1")
-
-
-def _contains_term(text: str, term: str) -> bool:
-    return bool(re.search(rf"(^|[^a-z0-9]){re.escape(term)}([^a-z0-9]|$)", text))
-
-
-def _classify_text_signals(text: str) -> list[str]:
-    flags: list[str] = []
-    for flag, terms in TEXT_POLICY_TERMS.items():
-        if any(_contains_term(text, term) for term in terms):
-            flags.append(flag)
-    if len(text.strip()) < 12:
-        flags.append("low_quality")
-    return sorted(set(flags))
-
-
-def _classify_media_signals(media_url: str) -> list[str]:
-    if not media_url:
-        return []
-    flags: list[str] = []
-    lowered = media_url.lower()
-    if not (lowered.startswith("http://") or lowered.startswith("https://")):
-        flags.append("unsafe_link")
-    path = lowered.split("?", 1)[0].split("#", 1)[0]
-    if "." not in path or not any(path.endswith(ext) for ext in SUPPORTED_MEDIA_EXTENSIONS):
-        flags.append("unsupported_media")
-    return sorted(set(flags))
-
-
 _proto_dir = os.path.join(app_dir, "proto")
 _health_pb2_path = os.path.join(_proto_dir, "health_pb2.py")
 _health_pb2_grpc_path = os.path.join(_proto_dir, "health_pb2_grpc.py")
@@ -170,6 +86,13 @@ except (ImportError, ModuleNotFoundError, FileNotFoundError) as e:
         "Or ensure Docker build completed successfully (proto files are generated during build)"
     )
     raise ImportError("gRPC stubs missing or invalid; run ./generate_proto.sh from ai_demo/") from e
+
+from services.content_review_classifier import review_content  # noqa: E402
+from services.operator_stats_prompt import (  # noqa: E402
+    compose_operator_chat_prompt as _compose_operator_chat_prompt,
+    stats_context_prefix as _stats_context_prefix,
+)
+from services.public_stats_fetcher import fetch_public_stats  # noqa: E402
 
 # Import AI model service - gRPC adapter that calls local Ollama
 try:
@@ -325,36 +248,10 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
 
     def FetchPublicStats(self, request, context):
         """HTTP GET of a configured absolute URL (intended for BeDemo public stats JSON)."""
-        url = (request.absolute_url or "").strip()
-        if not url.startswith("http://") and not url.startswith("https://"):
-            return health_pb2.FetchPublicStatsResponse(error="absolute_url must be http(s)")
-        try:
-            import ssl
-            import urllib.error
-            import urllib.request
-            from urllib.parse import urlparse
-
-            host = urlparse(url).hostname or ""
-            use_insecure_tls = _allow_insecure_tls_for_host(host)
-
-            req = urllib.request.Request(
-                url, headers={"User-Agent": "many-faces-ai-fetch-public-stats"}
-            )
-            open_kw: dict = {"timeout": 45}
-            if use_insecure_tls:
-                ctx = ssl.create_default_context()
-                ctx.check_hostname = False
-                ctx.verify_mode = ssl.CERT_NONE
-                open_kw["context"] = ctx
-
-            with urllib.request.urlopen(req, **open_kw) as resp:
-                body = resp.read().decode("utf-8", errors="replace")
-            return health_pb2.FetchPublicStatsResponse(json_body=body)
-        except urllib.error.HTTPError as e:
-            return health_pb2.FetchPublicStatsResponse(error=f"HTTP {e.code}: {e.reason}")
-        except Exception as e:
-            logger.warning("FetchPublicStats failed: %s", e)
-            return health_pb2.FetchPublicStatsResponse(error=str(e))
+        body, error = fetch_public_stats(request.absolute_url or "")
+        if error:
+            return health_pb2.FetchPublicStatsResponse(error=error)
+        return health_pb2.FetchPublicStatsResponse(json_body=body)
 
     def OperatorStatsChat(self, request, context):
         """Optional path: fetch live JSON then run the same Generate path with a composed prompt."""
@@ -403,47 +300,21 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
         title, body, media_url = sanitize_for_review(
             request.title, request.body, request.media_url or None
         )
-        text = f"{title} {body}".lower()
-        flags = [*_classify_text_signals(text), *_classify_media_signals(media_url or "")]
-        content_type = (request.content_type or "").strip()
-        # Document future dedicated image/video models without letting these markers affect risk scoring alone.
-        if content_type == "Album":
-            flags.append("image_analysis_boundary")
-        elif content_type == "Reel":
-            flags.append("video_analysis_boundary")
-        flags = sorted(set(flags))
-
-        # Policy-driving flags exclude integration placeholders so boundary tags never flip safe items to review.
-        policy_flags = [
-            f for f in flags if f not in ("image_analysis_boundary", "video_analysis_boundary")
-        ]
-        risk_level = "low"
-        decision = "approve"
-        confidence = 0.86
-        reason = (
-            "No obvious policy, media, or quality issue was detected by the classifier fallback."
+        result = review_content(
+            title,
+            body,
+            media_url,
+            (request.content_type or "").strip(),
         )
-        user_message = "Your content is waiting for final review."
-
-        if policy_flags:
-            high_risk_flags = {"hate", "adult", "violence", "self_harm", "unsafe_link"}
-            risk_level = (
-                "high" if any(flag in high_risk_flags for flag in policy_flags) else "medium"
-            )
-            decision = "reject" if risk_level == "high" else "needs_human_review"
-            confidence = 0.88 if risk_level == "high" else 0.72
-            reason = f"Potential moderation flags detected: {', '.join(sorted(set(policy_flags)))}."
-            user_message = "Your content needs changes before it can be published."
-
         return health_pb2.ContentReviewResponse(
-            decision=decision,
-            confidence=confidence,
-            risk_level=risk_level,
-            flags=flags,
-            reason=reason,
-            user_message=user_message,
-            model_version="qwen-advisory-classifier-v2",
-            trace_id=f"ai-review-{uuid.uuid4().hex}",
+            decision=result["decision"],
+            confidence=result["confidence"],
+            risk_level=result["risk_level"],
+            flags=result["flags"],
+            reason=result["reason"],
+            user_message=result["user_message"],
+            model_version=result["model_version"],
+            trace_id=result["trace_id"],
         )
 
 

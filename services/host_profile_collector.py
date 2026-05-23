@@ -10,12 +10,13 @@ import shutil
 import socket
 import subprocess
 import sys
-import urllib.error
-import urllib.request
 from datetime import UTC, datetime
 from typing import Any
 
 import psutil
+
+from utils.env import env_int_optional, ollama_base_url
+from utils.http_json import get_json, post_json
 
 COLLECTOR_VERSION = "1.0.0"
 SCHEMA_VERSION = 1
@@ -47,16 +48,6 @@ HOST_PROFILE_SECTIONS = (
 def _looks_like_container_id(hostname: str) -> bool:
     value = (hostname or "").strip().lower()
     return len(value) == 12 and all(ch in "0123456789abcdef" for ch in value)
-
-
-def _env_int(name: str) -> int | None:
-    raw = os.getenv(name, "").strip()
-    if not raw:
-        return None
-    try:
-        return int(raw)
-    except ValueError:
-        return None
 
 
 def _inside_docker() -> bool:
@@ -427,31 +418,20 @@ def _collect_disks() -> list[dict[str, Any]]:
 
 
 def _ollama_base_url() -> str:
-    return os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434").rstrip("/")
+    return ollama_base_url()
 
 
 def _http_get_json(url: str, timeout: float) -> dict[str, Any] | None:
-    req = urllib.request.Request(url, headers={"User-Agent": "many-faces-ai-host-profile"})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError):
-        return None
+    return get_json(url, timeout=timeout, user_agent="many-faces-ai-host-profile")
 
 
 def _http_post_json(url: str, payload: dict[str, Any], timeout: float) -> dict[str, Any] | None:
-    body = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
+    return post_json(
         url,
-        data=body,
-        headers={"Content-Type": "application/json", "User-Agent": "many-faces-ai-host-profile"},
-        method="POST",
+        payload,
+        timeout=timeout,
+        user_agent="many-faces-ai-host-profile",
     )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError):
-        return None
 
 
 def _injected_profile_path() -> str:
@@ -534,12 +514,12 @@ def _collect_ollama_runtime(model_name: str, warnings: list[str]) -> dict[str, A
         "ollamaModelConfigured": model_name,
         "ollamaReachable": False,
         "pythonVersion": platform.python_version(),
-        "grpcPort": _env_int("PORT") or 50051,
+        "grpcPort": env_int_optional("PORT") or 50051,
     }
-    ctx = _env_int("OLLAMA_NUM_CTX")
+    ctx = env_int_optional("OLLAMA_NUM_CTX")
     if ctx is not None:
         runtime["ollamaContextLength"] = ctx
-    num_gpu = _env_int("OLLAMA_NUM_GPU")
+    num_gpu = env_int_optional("OLLAMA_NUM_GPU")
     if num_gpu is not None:
         runtime["ollamaNumGpu"] = num_gpu
 

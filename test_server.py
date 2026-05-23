@@ -12,6 +12,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from services.operator_stats_prompt import allow_insecure_tls_for_host
+
 pytestmark = pytest.mark.grpc
 
 # Repo root (ai_demo) on path: `proto` package + `server` module
@@ -405,7 +407,9 @@ class TestGenerateWithStatsContext:
         mock_ai.generate.assert_not_called()
 
     def test_stats_context_prefix_keeps_backend_separator_contract(self):
-        prefix = server._stats_context_prefix('{"dashboard":{"usersCount":7}}')
+        from services.operator_stats_prompt import stats_context_prefix
+
+        prefix = stats_context_prefix('{"dashboard":{"usersCount":7}}')
 
         assert prefix.startswith("[Operator platform statistics JSON")
         assert '"usersCount":7' in prefix
@@ -441,11 +445,11 @@ class TestFetchPublicStats:
             assert "http" in resp.error.lower()
 
     def test_insecure_tls_bypass_is_loopback_only(self):
-        assert server._allow_insecure_tls_for_host("localhost")
-        assert server._allow_insecure_tls_for_host("127.0.0.1")
-        assert server._allow_insecure_tls_for_host("::1")
-        assert not server._allow_insecure_tls_for_host("api.example.com")
-        assert not server._allow_insecure_tls_for_host("localhost.example.com")
+        assert allow_insecure_tls_for_host("localhost")
+        assert allow_insecure_tls_for_host("127.0.0.1")
+        assert allow_insecure_tls_for_host("::1")
+        assert not allow_insecure_tls_for_host("api.example.com")
+        assert not allow_insecure_tls_for_host("localhost.example.com")
 
 
 class TestOperatorStatsChat:
@@ -494,12 +498,16 @@ class TestOperatorStatsChat:
         assert resp.error
 
     def test_compose_prompt_preserves_existing_history_and_latest_user_turn(self):
-        composed = server._compose_operator_chat_prompt("User: hi\nAI: hello", "Summarize")
+        from services.operator_stats_prompt import compose_operator_chat_prompt
+
+        composed = compose_operator_chat_prompt("User: hi\nAI: hello", "Summarize")
 
         assert composed == "User: hi\nAI: hello\nUser: Summarize\nAI:"
 
     def test_compose_prompt_does_not_add_extra_newline_when_history_already_has_one(self):
-        composed = server._compose_operator_chat_prompt("User: hi\nAI: hello\n", "Next")
+        from services.operator_stats_prompt import compose_operator_chat_prompt
+
+        composed = compose_operator_chat_prompt("User: hi\nAI: hello\n", "Next")
 
         assert composed == "User: hi\nAI: hello\nUser: Next\nAI:"
 

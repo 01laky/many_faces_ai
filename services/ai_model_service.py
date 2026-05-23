@@ -13,6 +13,8 @@ import urllib.error
 import urllib.request
 from datetime import UTC, datetime
 
+from utils.env import env_float, env_int, ollama_base_url
+
 logger = logging.getLogger(__name__)
 
 # Override in Docker via OLLAMA_MODEL.
@@ -41,22 +43,6 @@ _INVENTED_JSON_FENCE_RE = re.compile(
     r"```(?:json)?\s*\{[\s\S]*?(?:system_time|__typename)[\s\S]*?\}\s*```",
     re.IGNORECASE,
 )
-
-
-def _env_float(name: str, default: float) -> float:
-    raw = os.getenv(name, str(default)).strip()
-    try:
-        return float(raw)
-    except ValueError:
-        return default
-
-
-def _env_int(name: str, default: int) -> int:
-    raw = os.getenv(name, str(default)).strip()
-    try:
-        return int(raw)
-    except ValueError:
-        return default
 
 
 _PARROT_CLOSING_RE = re.compile(
@@ -256,10 +242,8 @@ class AIModelService:
     def __init__(self, model_name: str | None = None):
         self._model_name = model_name or os.getenv("OLLAMA_MODEL") or DEFAULT_MODEL_NAME
         self._load_error: str | None = None
-        self._ollama_base_url = os.getenv(
-            "OLLAMA_BASE_URL", "http://host.docker.internal:11434"
-        ).rstrip("/")
-        self._ollama_timeout_seconds = _env_int("OLLAMA_TIMEOUT_SECONDS", 300)
+        self._ollama_base_url = ollama_base_url()
+        self._ollama_timeout_seconds = env_int("OLLAMA_TIMEOUT_SECONDS", 300)
         cap_raw = os.getenv("MFAI_MAX_NEW_TOKENS_CAP", str(DEFAULT_MAX_NEW_TOKENS_CAP))
         try:
             self._max_new_tokens_cap = max(32, int(cap_raw))
@@ -320,13 +304,13 @@ class AIModelService:
 
     def _ollama_options(self, max_new_tokens: int) -> dict:
         options = {
-            "num_ctx": _env_int("OLLAMA_NUM_CTX", 4096),
+            "num_ctx": env_int("OLLAMA_NUM_CTX", 4096),
             "num_predict": max_new_tokens,
-            "num_thread": _env_int("OLLAMA_NUM_THREAD", _thread_count()),
-            "temperature": _env_float("OLLAMA_TEMPERATURE", 0.35),
-            "top_p": _env_float("OLLAMA_TOP_P", 0.9),
-            "top_k": _env_int("OLLAMA_TOP_K", 40),
-            "repeat_penalty": _env_float("OLLAMA_REPEAT_PENALTY", 1.15),
+            "num_thread": env_int("OLLAMA_NUM_THREAD", _thread_count()),
+            "temperature": env_float("OLLAMA_TEMPERATURE", 0.35),
+            "top_p": env_float("OLLAMA_TOP_P", 0.9),
+            "top_k": env_int("OLLAMA_TOP_K", 40),
+            "repeat_penalty": env_float("OLLAMA_REPEAT_PENALTY", 1.15),
         }
         for option_name, env_name in {
             "num_gpu": "OLLAMA_NUM_GPU",
