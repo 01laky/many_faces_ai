@@ -1,14 +1,11 @@
 """
 SHV2 PI-4: normalize untrusted title/body/media URL before ReviewContent classification.
 
-Mirrors many_faces_backend ``ContentModerationInputSanitizer`` (defense in depth). The .NET worker
-also sanitizes before gRPC; this module ensures delimiter/bidi/zero-width smuggling cannot bypass
-keyword classifiers inside the Python process when fields are sent to any LLM path.
+Mirrors many_faces_backend ``ContentModerationInputSanitizer`` (defense in depth).
 """
 
 from __future__ import annotations
 
-# Align with BeDemo.Api.Services.ContentModerationInputSanitizer
 MAX_TITLE_LENGTH = 200
 MAX_BODY_LENGTH_FOR_AI = 100_000
 MAX_MEDIA_URL_LENGTH = 2000

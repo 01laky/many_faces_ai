@@ -4,6 +4,7 @@
 
 | Start here       | Link                                                                                 |
 | ---------------- | ------------------------------------------------------------------------------------ |
+| **Security**     | [`docs/SECURITY.md`](./docs/SECURITY.md) — trust boundaries, auth, TLS, SSRF         |
 | Run standalone   | `./scripts/start-dev.sh`                                                             |
 | Full stack       | `../scripts/start-all-dev.sh` from `many_faces_main`                                 |
 | gRPC port        | `localhost:50051`                                                                    |
@@ -30,6 +31,17 @@ Python **gRPC adapter** providing **health checks**, optional **Ollama-backed te
 | [`README.md`](./README.md)                                   | This file — overview, roadmap, runbook.                                                    |
 | [`AI_INTEGRATION.md`](./AI_INTEGRATION.md)                   | Integration notes for backends and operators (when maintained).                            |
 | [`docs/grpc-search-worker.md`](./docs/grpc-search-worker.md) | Future gRPC client to the Go search-worker (`many_faces_elastic`); same protos as backend. |
+| [`docs/SECURITY.md`](./docs/SECURITY.md)                   | **AIH1** security guide — auth, TLS, SSRF, moderation, production checklist.              |
+
+### Security at a glance
+
+- Internal **gRPC only** — no public HTTP API; backend is the sole intended caller.
+- Optional **`x-ai-worker-token`** metadata auth; hardened profile requires it at startup.
+- Optional **gRPC TLS** via `GRPC_TLS_CERT_FILE` / `GRPC_TLS_KEY_FILE`.
+- **`ReviewContent`** runs PI-4 sanitization on untrusted creator fields before classification.
+- **`FetchPublicStats`** applies worker-side SSRF policy (HTTPS public, loopback HTTP in dev).
+- Prompt / token caps and optional in-process rate limit on hot RPCs.
+- Security regression tests: `tests/**/*_security.py` — run `node ../scripts/verify-ai-security-tests.mjs` from monorepo root.
 
 Monorepo guides: [`docs/readmes/ai-grpc-overview.md`](../docs/readmes/ai-grpc-overview.md), [`docs/guides/admin-dashboard-metrics.md`](../docs/guides/admin-dashboard-metrics.md).
 

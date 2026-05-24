@@ -14,6 +14,7 @@ import urllib.request
 from datetime import UTC, datetime
 
 from utils.env import env_float, env_int, ollama_base_url
+from utils.log_redaction import redact_sensitive
 
 logger = logging.getLogger(__name__)
 
@@ -271,7 +272,13 @@ class AIModelService:
     def _ensure_loaded(self):
         self._ensure_ollama_ready()
 
-    def _ollama_post_json(self, path: str, payload: dict) -> dict:
+    def _ollama_post_json(
+        self,
+        path: str,
+        payload: dict,
+        *,
+        rpc_deadline_seconds: float | None = None,
+    ) -> dict:
         body = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
             f"{self._ollama_base_url}{path}",
@@ -279,11 +286,14 @@ class AIModelService:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
+        timeout = self._ollama_timeout_seconds
+        if rpc_deadline_seconds is not None and rpc_deadline_seconds > 0:
+            timeout = min(timeout, rpc_deadline_seconds)
         try:
-            with urllib.request.urlopen(req, timeout=self._ollama_timeout_seconds) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
+            detail = redact_sensitive(exc.read().decode("utf-8", errors="replace"))
             raise RuntimeError(f"Ollama HTTP {exc.code}: {detail}") from exc
 
     def _ollama_model_available(self) -> bool:
@@ -325,7 +335,13 @@ class AIModelService:
                 logger.warning("Ignoring invalid %s=%r", env_name, raw)
         return options
 
-    def _generate_ollama(self, messages: list[dict], max_new_tokens: int) -> str:
+    def _generate_ollama(
+        self,
+        messages: list[dict],
+        max_new_tokens: int,
+        *,
+        rpc_deadline_seconds: float | None = None,
+    ) -> str:
         payload = {
             "model": self._model_name,
             "messages": messages,
@@ -333,7 +349,11 @@ class AIModelService:
             "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
             "options": self._ollama_options(max_new_tokens),
         }
-        data = self._ollama_post_json("/api/chat", payload)
+        data = self._ollama_post_json(
+            "/api/chat",
+            payload,
+            rpc_deadline_seconds=rpc_deadline_seconds,
+        )
         message = data.get("message") if isinstance(data, dict) else None
         if isinstance(message, dict):
             return str(message.get("content") or "")
@@ -383,6 +403,7 @@ class AIModelService:
         prompt: str,
         max_new_tokens: int | None = None,
         response_locale: str | None = None,
+        rpc_deadline_seconds: float | None = None,
     ) -> str:
         if not prompt or not prompt.strip():
             return ""
@@ -395,11 +416,15 @@ class AIModelService:
             messages.append({"role": "user", "content": prompt.strip()})
 
         try:
-            response = self._generate_ollama(messages, max_tok)
+            response = self._generate_ollama(
+                messages,
+                max_tok,
+                rpc_deadline_seconds=rpc_deadline_seconds,
+            )
             last_user = _last_user_message_from_messages(messages)
             return _sanitize_assistant_reply(response, last_user)
         except Exception as e:
-            logger.exception("Error generating text: %s", e)
+            logger.exception("Error generating text: %s", redact_sensitive(str(e)))
             return ""
 
     def is_loaded(self) -> bool:

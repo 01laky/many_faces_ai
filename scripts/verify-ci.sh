@@ -48,4 +48,7 @@ fi
 
 PYTHONPATH="$ROOT" "$VENVDIR/bin/pytest" test_server.py tests/ -q
 
+echo "🔒 AIH1 security subset..."
+find "$ROOT/tests" -name '*_security.py' -print0 | xargs -0 env PYTHONPATH="$ROOT" "$VENVDIR/bin/pytest" -q
+
 echo "✅ many_faces_ai verify-ci passed"

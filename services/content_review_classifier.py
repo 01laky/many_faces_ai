@@ -32,6 +32,8 @@ SUPPORTED_MEDIA_EXTENSIONS = {
 MODEL_VERSION = "qwen-advisory-classifier-v2"
 BOUNDARY_FLAGS = frozenset({"image_analysis_boundary", "video_analysis_boundary"})
 HIGH_RISK_FLAGS = frozenset({"hate", "adult", "violence", "self_harm", "unsafe_link"})
+VALID_DECISIONS = frozenset({"approve", "reject", "needs_human_review"})
+VALID_RISK_LEVELS = frozenset({"low", "medium", "high"})
 
 
 class ContentReviewResult(TypedDict):
@@ -72,6 +74,32 @@ def classify_media_signals(media_url: str) -> list[str]:
     return sorted(set(flags))
 
 
+def normalize_review_result(result: ContentReviewResult) -> ContentReviewResult:
+    """Defensive bounds on classifier output (AIH1-D5)."""
+    decision = result["decision"]
+    if decision not in VALID_DECISIONS:
+        decision = "needs_human_review"
+    try:
+        confidence = float(result["confidence"])
+    except (TypeError, ValueError):
+        confidence = 0.5
+    confidence = max(0.0, min(1.0, confidence))
+    risk = result["risk_level"]
+    if risk not in VALID_RISK_LEVELS:
+        risk = "medium"
+    flags = [f for f in result["flags"] if isinstance(f, str) and f.strip()]
+    return ContentReviewResult(
+        decision=decision,
+        confidence=confidence,
+        risk_level=risk,
+        flags=sorted(set(flags)),
+        reason=str(result["reason"])[:2000],
+        user_message=str(result["user_message"])[:500],
+        model_version=str(result["model_version"])[:64] or MODEL_VERSION,
+        trace_id=str(result["trace_id"])[:128],
+    )
+
+
 def review_content(
     title: str,
     body: str,
@@ -110,3 +138,12 @@ def review_content(
         model_version=MODEL_VERSION,
         trace_id=f"ai-review-{uuid.uuid4().hex}",
     )
+
+
+def review_content_normalized(
+    title: str,
+    body: str,
+    media_url: str | None,
+    content_type: str,
+) -> ContentReviewResult:
+    return normalize_review_result(review_content(title, body, media_url, content_type))

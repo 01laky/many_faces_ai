@@ -10,6 +10,24 @@ from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlparse
 
+from utils.outbound_url_policy import validate_public_fetch_url
+
+DEFAULT_MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        ok, reason = validate_public_fetch_url(newurl)
+        if not ok:
+            raise urllib.error.HTTPError(
+                newurl,
+                code,
+                f"redirect blocked: {reason}",
+                headers,
+                fp,
+            )
+        return None
+
 
 def get_json(
     url: str,
@@ -62,11 +80,15 @@ def fetch_public_stats_body(
     *,
     allow_insecure_tls_for_host: Callable[[str], bool],
     timeout: float = 45.0,
+    max_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
 ) -> tuple[str, str]:
     """Return ``(json_body, error)`` — exactly one field is non-empty."""
     url = (absolute_url or "").strip()
-    if not url.startswith("http://") and not url.startswith("https://"):
-        return "", "absolute_url must be http(s)"
+    ok, reason = validate_public_fetch_url(url)
+    if not ok:
+        if reason == "invalid_scheme":
+            return "", "absolute_url must be http(s)"
+        return "", reason
 
     host = urlparse(url).hostname or ""
     use_insecure_tls = allow_insecure_tls_for_host(host)
@@ -78,10 +100,13 @@ def fetch_public_stats_body(
         open_kw["context"] = ctx
 
     req = urllib.request.Request(url, headers={"User-Agent": "many-faces-ai-fetch-public-stats"})
+    opener = urllib.request.build_opener(_NoRedirectHandler())
     try:
-        with urllib.request.urlopen(req, **open_kw) as resp:
-            body = resp.read().decode("utf-8", errors="replace")
-        return body, ""
+        with opener.open(req, **open_kw) as resp:
+            body = resp.read(max_bytes + 1)
+        if len(body) > max_bytes:
+            return "", "response too large"
+        return body.decode("utf-8", errors="replace"), ""
     except urllib.error.HTTPError as exc:
         return "", f"HTTP {exc.code}: {exc.reason}"
     except Exception as exc:

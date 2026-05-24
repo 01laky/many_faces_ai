@@ -269,7 +269,7 @@ class TestHealthServiceServicer:
         service = AIModelService()
         calls = []
 
-        def fake_post(path: str, payload: dict) -> dict:
+        def fake_post(path: str, payload: dict, **kwargs) -> dict:
             calls.append((path, payload))
             if path == "/api/show":
                 return {"model": payload["model"]}
@@ -442,7 +442,7 @@ class TestFetchPublicStats:
             req = health_pb2.FetchPublicStatsRequest(absolute_url=url)
             resp = servicer.FetchPublicStats(req, mock_context)
             assert resp.json_body == ""
-            assert "http" in resp.error.lower()
+            assert resp.error.lower() in ("empty", "absolute_url must be http(s)")
 
     def test_insecure_tls_bypass_is_loopback_only(self):
         assert allow_insecure_tls_for_host("localhost")

@@ -87,13 +87,17 @@ except (ImportError, ModuleNotFoundError, FileNotFoundError) as e:
     )
     raise ImportError("gRPC stubs missing or invalid; run ./generate_proto.sh from ai_demo/") from e
 
-from services.content_review_classifier import review_content  # noqa: E402
+from services.content_review_classifier import review_content_normalized  # noqa: E402
 from services.operator_stats_prompt import (  # noqa: E402
     compose_operator_chat_prompt as _compose_operator_chat_prompt,
     stats_context_prefix as _stats_context_prefix,
 )
 from services.public_stats_fetcher import fetch_public_stats  # noqa: E402
 from utils.grpc_worker_auth import WorkerAuthInterceptor, expected_token_from_env  # noqa: E402
+from utils.log_redaction import redact_sensitive  # noqa: E402
+from utils.rpc_limits import MAX_PROMPT_CHARS, clamp_max_new_tokens  # noqa: E402
+from utils.rpc_rate_limit import check_rpc_rate_limit  # noqa: E402
+from utils.validate_worker_env import WorkerEnvValidationError, validate_worker_env  # noqa: E402
 
 # Import AI model service - gRPC adapter that calls local Ollama
 try:
@@ -110,6 +114,14 @@ except ImportError as e:
         return {}
 
 
+def _grpc_message_size_options() -> list[tuple[str, int]]:
+    max_bytes = 8 * 1024 * 1024
+    return [
+        ("grpc.max_send_message_length", max_bytes),
+        ("grpc.max_receive_message_length", max_bytes),
+    ]
+
+
 def _model_status_payload() -> dict:
     if _ai_service is None:
         return {
@@ -118,13 +130,16 @@ def _model_status_payload() -> dict:
             "unavailable": True,
             "modelName": None,
         }
-    return {
+    payload = {
         "ready": _ai_service.is_loaded(),
         "loading": _ai_service.is_loading(),
         "unavailable": _ai_service.is_unavailable(),
         "modelName": _ai_service.model_name,
-        "error": _ai_service.load_error(),
     }
+    err = _ai_service.load_error()
+    if err:
+        payload["error"] = redact_sensitive(err, max_len=200)
+    return payload
 
 
 def _preload_model_blocking() -> bool:
@@ -140,7 +155,7 @@ def _preload_model_blocking() -> bool:
         logger.info("AI model ready for inference.")
         return True
     except Exception as exc:
-        logger.error("Blocking model preload failed: %s", exc)
+        logger.error("Blocking model preload failed: %s", redact_sensitive(str(exc)))
         return False
 
 
@@ -150,6 +165,10 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
 
     This class handles health check requests from clients.
     """
+
+    @staticmethod
+    def _rate_limited(method: str) -> tuple[bool, str]:
+        return check_rpc_rate_limit(method)
 
     def HealthCheck(self, request, context):
         """
@@ -179,13 +198,13 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
             model_name = _ai_service.model_name if _ai_service is not None else None
             profile = collect_host_profile(model_name)
             if not profile:
-                return health_pb2.HostProfileResponse(error="collection failed")
+                return health_pb2.HostProfileResponse(error="host profile unavailable")
             return health_pb2.HostProfileResponse(
                 json_body=json.dumps(profile, ensure_ascii=False),
             )
         except Exception as exc:
-            logger.exception("GetHostProfile failed: %s", exc)
-            return health_pb2.HostProfileResponse(error=str(exc))
+            logger.debug("GetHostProfile failed: %s", redact_sensitive(str(exc)), exc_info=True)
+            return health_pb2.HostProfileResponse(error="host profile unavailable")
 
     def Generate(self, request, context):
         """
@@ -201,7 +220,12 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
         Returns:
             GenerateResponse with generated text (text field) or error message (error field)
         """
-        logger.info("Generate requested, prompt length=%d", len(request.prompt or ""))
+        ok, rate_err = self._rate_limited("Generate")
+        if not ok:
+            return health_pb2.GenerateResponse(text="", error=rate_err)
+
+        prompt_len = len(request.prompt or "")
+        logger.info("Generate requested, prompt length=%d", prompt_len)
         if _ai_service is None:
             return health_pb2.GenerateResponse(
                 text="",
@@ -218,17 +242,23 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
                 # block into a system message immediately before the latest user question.
                 stats_block = _stats_context_prefix(js)
         full_prompt = stats_block + prompt
-        max_new_tokens = request.max_new_tokens if request.max_new_tokens > 0 else 50
+        if len(full_prompt) > MAX_PROMPT_CHARS:
+            return health_pb2.GenerateResponse(text="", error="prompt too long")
+        max_new_tokens = clamp_max_new_tokens(
+            request.max_new_tokens if request.max_new_tokens > 0 else 0
+        )
         response_locale = None
         if request.HasField("response_locale"):
             rl = (request.response_locale or "").strip()
             if rl:
                 response_locale = rl
+        deadline_seconds = context.time_remaining()
         try:
             text = _ai_service.generate(
                 full_prompt,
                 max_new_tokens=max_new_tokens,
                 response_locale=response_locale,
+                rpc_deadline_seconds=deadline_seconds,
             )
             return health_pb2.GenerateResponse(text=text)
         except RuntimeError as e:
@@ -239,13 +269,13 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
                     text="⏳ AI model sa práve načítava do pamäte. Skúste to prosím o chvíľu znova."
                 )
             if "MODEL_LOAD_FAILED" in err:
-                logger.warning("Model load previously failed: %s", err)
+                logger.warning("Model load previously failed: %s", redact_sensitive(err))
                 return health_pb2.GenerateResponse(
                     text="",
                     error="AI model sa nepodarilo načítať cez Ollama. Skontrolujte, či Ollama beží a model OLLAMA_MODEL je stiahnutý.",
                 )
-            logger.exception("Generate failed: %s", e)
-            return health_pb2.GenerateResponse(text="", error=str(e))
+            logger.exception("Generate failed: %s", redact_sensitive(err))
+            return health_pb2.GenerateResponse(text="", error="generation failed")
 
     def FetchPublicStats(self, request, context):
         """HTTP GET of a configured absolute URL (intended for BeDemo public stats JSON)."""
@@ -256,6 +286,10 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
 
     def OperatorStatsChat(self, request, context):
         """Optional path: fetch live JSON then run the same Generate path with a composed prompt."""
+        ok, rate_err = self._rate_limited("OperatorStatsChat")
+        if not ok:
+            return health_pb2.GenerateResponse(text="", error=rate_err)
+
         stats_json = ""
         if request.fetch_live_public_snapshot:
             u = (request.public_stats_absolute_url or "").strip()
@@ -272,10 +306,12 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
         if not user_msg:
             return health_pb2.GenerateResponse(text="", error="user_message is required")
 
-        max_tok = request.max_new_tokens if request.max_new_tokens > 0 else 150
-        # Reuse the same transcript format as the backend chat path:
-        # historical turns first, then the latest user turn, then an empty AI slot.
+        max_tok = clamp_max_new_tokens(
+            request.max_new_tokens if request.max_new_tokens > 0 else 150
+        )
         composed = _compose_operator_chat_prompt(request.history_text or "", user_msg)
+        if len(composed) > MAX_PROMPT_CHARS:
+            return health_pb2.GenerateResponse(text="", error="prompt too long")
         inner = health_pb2.GenerateRequest(prompt=composed, max_new_tokens=max_tok)
         if stats_json:
             inner.stats_context_json = stats_json
@@ -295,17 +331,42 @@ class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
 
         The backend still validates confidence/decision ranges and never auto-publishes solely on this response.
         """
-        # PI-4: mirror backend sanitizer at RPC entry (untrusted creator content only).
+        ok, rate_err = self._rate_limited("ReviewContent")
+        if not ok:
+            return health_pb2.ContentReviewResponse(
+                decision="needs_human_review",
+                confidence=0.5,
+                risk_level="medium",
+                flags=["rate_limit"],
+                reason=rate_err,
+                user_message="Content review is temporarily unavailable.",
+                model_version="",
+                trace_id="",
+            )
+
         from moderation_input_sanitize import sanitize_for_review
 
-        title, body, media_url = sanitize_for_review(
-            request.title, request.body, request.media_url or None
+        content_type = (request.content_type or "").strip()
+        raw_title = request.title or ""
+        raw_body = request.body or ""
+        logger.info(
+            "ReviewContent requested content_type=%s title_len=%d body_len=%d",
+            content_type or "(none)",
+            len(raw_title),
+            len(raw_body),
         )
-        result = review_content(
+        title, body, media_url = sanitize_for_review(raw_title, raw_body, request.media_url or None)
+        result = review_content_normalized(
             title,
             body,
             media_url,
-            (request.content_type or "").strip(),
+            content_type,
+        )
+        logger.info(
+            "ReviewContent completed trace_id=%s decision=%s confidence=%.2f",
+            result["trace_id"],
+            result["decision"],
+            result["confidence"],
         )
         return health_pb2.ContentReviewResponse(
             decision=result["decision"],
@@ -326,21 +387,22 @@ def serve():
     The server listens on the port specified by the PORT environment variable,
     or defaults to 50051 if not set.
     """
-    # Get port from environment variable or use default
+    try:
+        validate_worker_env()
+    except WorkerEnvValidationError as exc:
+        logger.error("Worker environment validation failed: %s", exc)
+        sys.exit(1)
+
     port = os.getenv("PORT", "50051")
     server_address = f"0.0.0.0:{port}"
 
     logger.info(f"Starting gRPC server on {server_address}")
 
-    # Create gRPC server with thread pool executor
-    # max_workers: number of threads to handle concurrent requests
-    # Keep-alive options: allow clients to send frequent pings (needed for
-    # .NET gRPC client that sends keep-alive pings every 60s while waiting
-    # for long-running AI generation requests).
     server_options = [
         ("grpc.keepalive_permit_without_calls", 1),
         ("grpc.http2.min_ping_interval_without_data_ms", 20000),
         ("grpc.http2.min_recv_ping_interval_without_data_ms", 20000),
+        *_grpc_message_size_options(),
     ]
     interceptors = []
     worker_token = expected_token_from_env()
@@ -353,11 +415,22 @@ def serve():
         options=server_options,
     )
 
-    # Add HealthService to the server
     health_pb2_grpc.add_HealthServiceServicer_to_server(HealthServiceServicer(), server)
 
-    # Add insecure port (for development - use TLS in production)
-    server.add_insecure_port(server_address)
+    cert_file = os.getenv("GRPC_TLS_CERT_FILE", "").strip()
+    key_file = os.getenv("GRPC_TLS_KEY_FILE", "").strip()
+    if cert_file and key_file:
+        with open(cert_file, "rb") as cert_fp:
+            cert_chain = cert_fp.read()
+        with open(key_file, "rb") as key_fp:
+            private_key = key_fp.read()
+        credentials = grpc.ssl_server_credentials([(private_key, cert_chain)])
+        server.add_secure_port(server_address, credentials)
+        logger.info("gRPC TLS enabled (GRPC_TLS_CERT_FILE / GRPC_TLS_KEY_FILE)")
+    else:
+        server.add_insecure_port(server_address)
+        if os.getenv("MFAI_ALLOW_INSECURE_GRPC", "").strip():
+            logger.warning("gRPC listening on insecure port (MFAI_ALLOW_INSECURE_GRPC)")
 
     if not _preload_model_blocking():
         logger.warning(
@@ -368,7 +441,6 @@ def serve():
     logger.info(f"gRPC server started on {server_address}")
 
     try:
-        # Keep the server running
         server.wait_for_termination()
     except KeyboardInterrupt:
         logger.info("Shutting down server...")
