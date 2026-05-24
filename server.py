@@ -93,6 +93,7 @@ from services.operator_stats_prompt import (  # noqa: E402
     stats_context_prefix as _stats_context_prefix,
 )
 from services.public_stats_fetcher import fetch_public_stats  # noqa: E402
+from utils.grpc_worker_auth import WorkerAuthInterceptor, expected_token_from_env  # noqa: E402
 
 # Import AI model service - gRPC adapter that calls local Ollama
 try:
@@ -341,8 +342,14 @@ def serve():
         ("grpc.http2.min_ping_interval_without_data_ms", 20000),
         ("grpc.http2.min_recv_ping_interval_without_data_ms", 20000),
     ]
+    interceptors = []
+    worker_token = expected_token_from_env()
+    if worker_token:
+        interceptors.append(WorkerAuthInterceptor(worker_token))
+        logger.info("AI worker gRPC auth enabled (AI_WORKER_EXPECTED_TOKEN)")
     server = grpc.server(
         futures.ThreadPoolExecutor(max_workers=10),
+        interceptors=interceptors,
         options=server_options,
     )
 
