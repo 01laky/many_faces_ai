@@ -29,9 +29,9 @@ Python **gRPC adapter** providing **health checks**, optional **Ollama-backed te
 | Doc                                                          | Purpose                                                                                    |
 | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
 | [`README.md`](./README.md)                                   | This file — overview, roadmap, runbook.                                                    |
-| [`AI_INTEGRATION.md`](./AI_INTEGRATION.md)                   | Integration notes for backends and operators (when maintained).                            |
-| [`docs/grpc-search-worker.md`](./docs/grpc-search-worker.md) | Future gRPC client to the Go search-worker (`many_faces_elastic`); same protos as backend. |
 | [`docs/SECURITY.md`](./docs/SECURITY.md)                   | **AIH1** security guide — auth, TLS, SSRF, moderation, production checklist.              |
+| [`docs/operator-live-stats-map-reduce.md`](./docs/operator-live-stats-map-reduce.md) | Live stats map-reduce for operator chat. |
+| [`docs/host-profile.md`](./docs/host-profile.md)           | Host profile RPC and admin settings panel wiring.                                            |
 
 ### Security at a glance
 
@@ -90,7 +90,7 @@ Target responsibilities:
 - Return a structured decision: `approve`, `reject`, or `needs_human_review`.
 - Include confidence, risk level, flags, internal reason, safe user-facing message, model version, and trace id.
 - Avoid autonomous side effects; all durable state changes stay in the API.
-- Support auditability with stable trace metadata; automated tests live in `many_faces_ai/test_server.py`.
+- Support auditability with stable trace metadata; tests in `test_server.py`, `tests/test_*_security.py` (AIH1), and shared sanitize corpus.
 
 Safety rule:
 
@@ -112,7 +112,7 @@ The **many_faces_backend** `ChatHub` may call these RPCs when a platform operato
 
 **Proto:** canonical **`health.proto`** lives in the nested **`many_faces_proto`** submodule at **`many_faces_ai/many_faces_proto/proto/health.proto`**. Regenerate with **`scripts/generate_proto.sh`**; generated `*_pb2.py` files are gitignored — use a **`.venv`** with **`grpcio-tools`** when `python3 -m grpc_tools.protoc` is not available on the host.
 
-**Tests:** `test_server.py` covers **`Generate`** + stats context (mocked **`AIModelService`**), invalid **`FetchPublicStats`** URLs, and **`OperatorStatsChat`** validation / unreachable live URL behaviour.
+**Tests:** `test_server.py` + **`tests/**/*_security.py`** (AIH1) cover **`Generate`**, **`FetchPublicStats`**, **`ReviewContent`**, auth/TLS env, and SSRF policy.
 
 ## Features
 
@@ -324,7 +324,8 @@ message HealthCheckResponse {
 
 ### Environment Variables
 
-- `PORT` - gRPC server port (default: `50051`)
+- `PORT` — gRPC server port (default: `50051`)
+- **Security (AIH1):** see [`docs/SECURITY.md`](./docs/SECURITY.md) §6 and [`.env.example`](./.env.example) — `AI_WORKER_EXPECTED_TOKEN`, `MFAI_REQUIRE_WORKER_AUTH`, `GRPC_TLS_*`, `OLLAMA_BASE_URL`, etc.
 
 Configured in `docker-compose.dev.yml`:
 
@@ -377,6 +378,14 @@ This generates:
 4. **Rebuild Docker image**: `./scripts/rebuild-dev.sh`
 
 ## Testing
+
+### Security regression (AIH1)
+
+```bash
+./scripts/verify-ci.sh              # ruff + full pytest + *_security.py subset
+node ../scripts/verify-ai-security-tests.mjs   # from monorepo root
+./scripts/smoke-grpc-tls.sh         # optional transport smoke
+```
 
 ### Manual Testing
 
@@ -470,7 +479,7 @@ If you see `ModuleNotFoundError` for proto files:
 
 - **Proto Generation**: Proto files are generated during Docker build, not locally
 - **Network Access**: Service is accessible from other containers on the same Docker network
-- **Production**: For production, consider adding authentication, TLS, and more comprehensive health checks
+- **Production security**: Optional gRPC TLS + `x-ai-worker-token`, worker SSRF policy, and startup validation — see [`docs/SECURITY.md`](./docs/SECURITY.md) §4–§10 (AIH1).
 
 ## Monorepo documentation
 
