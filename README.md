@@ -1,8 +1,6 @@
 # Many Faces AI service - gRPC Server
 
-**Local AI adapter for the Many Faces platform.** This Python service exposes the gRPC surface that the backend uses for operator chat generation, live statistics prompts, AI-assisted content review, and AI worker host profiling. The model itself runs in **Ollama on the host**; the container stays lightweight.
-
-> **First visit?** **No public HTTP** — only `many_faces_backend` should call this service. Ollama runs on the **host**, not inside this container.
+**Local AI adapter for the Many Faces platform.** This Python service exposes the gRPC surface that the backend uses for operator chat generation, live statistics prompts, AI-assisted content review, and AI worker host profiling. The model itself runs in **Ollama on the host**; the container stays lightweight. **No public HTTP** — only `many_faces_backend` should call this service.
 
 ### Three pillars
 
