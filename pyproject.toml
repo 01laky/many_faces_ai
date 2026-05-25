@@ -15,6 +15,9 @@ include = '\.pyi?$'
 line-length = 100
 target-version = "py311"
 
+[tool.ruff.format]
+indent-style = "tab"
+
 [tool.ruff.lint]
 select = [
     "E",   # pycodestyle errors
@@ -27,6 +30,7 @@ select = [
 ]
 ignore = [
     "E501",  # line too long (handled by black)
+    "W191",  # tab indentation (required by format.indent-style = tab)
 ]
 
 [tool.ruff.lint.per-file-ignores]

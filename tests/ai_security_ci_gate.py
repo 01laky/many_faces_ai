@@ -8,5 +8,5 @@ SECURITY_TEST_GLOB = "tests/**/*_security.py"
 
 
 def security_test_files() -> list[Path]:
-    root = Path(__file__).resolve().parent.parent
-    return sorted(root.glob("tests/**/*_security.py"))
+	root = Path(__file__).resolve().parent.parent
+	return sorted(root.glob("tests/**/*_security.py"))

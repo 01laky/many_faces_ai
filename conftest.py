@@ -5,5 +5,5 @@ import pytest
 
 @pytest.fixture
 def grpc_timeout_seconds() -> float:
-    """Default short timeout for mocked channel tests."""
-    return 5.0
+	"""Default short timeout for mocked channel tests."""
+	return 5.0

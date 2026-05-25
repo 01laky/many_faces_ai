@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parent
 
 
 def ensure_repo_root_on_path() -> Path:
-    root = str(ROOT)
-    if root not in sys.path:
-        sys.path.insert(0, root)
-    return ROOT
+	root = str(ROOT)
+	if root not in sys.path:
+		sys.path.insert(0, root)
+	return ROOT

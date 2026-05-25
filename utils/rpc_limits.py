@@ -9,6 +9,6 @@ MIN_NEW_TOKENS = 1
 
 
 def clamp_max_new_tokens(value: int) -> int:
-    if value <= 0:
-        return MAX_NEW_TOKENS_DEFAULT
-    return min(value, MAX_NEW_TOKENS_CAP)
+	if value <= 0:
+		return MAX_NEW_TOKENS_DEFAULT
+	return min(value, MAX_NEW_TOKENS_CAP)
