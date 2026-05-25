@@ -1,14 +1,16 @@
 # Many Faces AI service - gRPC Server
 
+**Version:** [`0.8.0`](./VERSION) · [Changelog](./CHANGELOG.md)
+
 **Local AI adapter for the Many Faces platform.** This Python service exposes the gRPC surface that the backend uses for operator chat generation, live statistics prompts, AI-assisted content review, and AI worker host profiling. The model itself runs in **Ollama on the host**; the container stays lightweight. **No public HTTP** — only `many_faces_backend` should call this service.
 
 ### Three pillars
 
-| Pillar | Highlights |
-| ------ | ----------- |
+| Pillar              | Highlights                                                                                                                                                                                                                                                            |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Security (AIH1)** | Internal **gRPC only**; optional **`x-ai-worker-token`** metadata; **TLS** via `GRPC_TLS_CERT_FILE`; SSRF guards on public stats fetch; moderation output sanitization. CI: `node ../scripts/verify-ai-security-tests.mjs`. [`docs/SECURITY.md`](./docs/SECURITY.md). |
-| **AI capabilities** | **`Generate`** (operator chat + optional `stats_context_json`); **`ReviewContent`** (structured moderation for albums/blogs/reels); **`OperatorStatsChat`** / **`FetchPublicStats`** (live stats map-reduce); **`GetHostProfile`** (admin settings panel). |
-| **Configuration** | **`OLLAMA_HOST`**, model name, timeout, max tokens via env; host profile exposed to admin; compose profile **`ai-dev`** in monorepo stack. Live stats: [`docs/operator-live-stats-map-reduce.md`](./docs/operator-live-stats-map-reduce.md). |
+| **AI capabilities** | **`Generate`** (operator chat + optional `stats_context_json`); **`ReviewContent`** (structured moderation for albums/blogs/reels); **`OperatorStatsChat`** / **`FetchPublicStats`** (live stats map-reduce); **`GetHostProfile`** (admin settings panel).            |
+| **Configuration**   | **`OLLAMA_HOST`**, model name, timeout, max tokens via env; host profile exposed to admin; compose profile **`ai-dev`** in monorepo stack. Live stats: [`docs/operator-live-stats-map-reduce.md`](./docs/operator-live-stats-map-reduce.md).                          |
 
 | Start here       | Link                                                                                 |
 | ---------------- | ------------------------------------------------------------------------------------ |
@@ -34,12 +36,12 @@ Python **gRPC adapter** providing **health checks**, optional **Ollama-backed te
 
 ## Documentation in this repo
 
-| Doc                                                          | Purpose                                                                                    |
-| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
-| [`README.md`](./README.md)                                   | This file — overview, roadmap, runbook.                                                    |
-| [`docs/SECURITY.md`](./docs/SECURITY.md)                   | **AIH1** security guide — auth, TLS, SSRF, moderation, production checklist.              |
-| [`docs/operator-live-stats-map-reduce.md`](./docs/operator-live-stats-map-reduce.md) | Live stats map-reduce for operator chat. |
-| [`docs/host-profile.md`](./docs/host-profile.md)           | Host profile RPC and admin settings panel wiring.                                            |
+| Doc                                                                                  | Purpose                                                                      |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| [`README.md`](./README.md)                                                           | This file — overview, roadmap, runbook.                                      |
+| [`docs/SECURITY.md`](./docs/SECURITY.md)                                             | **AIH1** security guide — auth, TLS, SSRF, moderation, production checklist. |
+| [`docs/operator-live-stats-map-reduce.md`](./docs/operator-live-stats-map-reduce.md) | Live stats map-reduce for operator chat.                                     |
+| [`docs/host-profile.md`](./docs/host-profile.md)                                     | Host profile RPC and admin settings panel wiring.                            |
 
 ### Security at a glance
 
@@ -120,7 +122,7 @@ The **many_faces_backend** `ChatHub` may call these RPCs when a platform operato
 
 **Proto:** canonical **`health.proto`** lives in the nested **`many_faces_proto`** submodule at **`many_faces_ai/many_faces_proto/proto/health.proto`**. Regenerate with **`scripts/generate_proto.sh`**; generated `*_pb2.py` files are gitignored — use a **`.venv`** with **`grpcio-tools`** when `python3 -m grpc_tools.protoc` is not available on the host.
 
-**Tests:** `test_server.py` + **`tests/**/*_security.py`** (AIH1) cover **`Generate`**, **`FetchPublicStats`**, **`ReviewContent`**, auth/TLS env, and SSRF policy.
+**Tests:** `test_server.py` + **`tests/**/\*\_security.py`** (AIH1) cover **`Generate`**, **`FetchPublicStats`**, **`ReviewContent`\*\*, auth/TLS env, and SSRF policy.
 
 ## Features
 
