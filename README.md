@@ -2,6 +2,16 @@
 
 **Local AI adapter for the Many Faces platform.** This Python service exposes the gRPC surface that the backend uses for operator chat generation, live statistics prompts, AI-assisted content review, and AI worker host profiling. The model itself runs in **Ollama on the host**; the container stays lightweight.
 
+> **First visit?** **No public HTTP** — only `many_faces_backend` should call this service. Ollama runs on the **host**, not inside this container.
+
+### Three pillars
+
+| Pillar | Highlights |
+| ------ | ----------- |
+| **Security (AIH1)** | Internal **gRPC only**; optional **`x-ai-worker-token`** metadata; **TLS** via `GRPC_TLS_CERT_FILE`; SSRF guards on public stats fetch; moderation output sanitization. CI: `node ../scripts/verify-ai-security-tests.mjs`. [`docs/SECURITY.md`](./docs/SECURITY.md). |
+| **AI capabilities** | **`Generate`** (operator chat + optional `stats_context_json`); **`ReviewContent`** (structured moderation for albums/blogs/reels); **`OperatorStatsChat`** / **`FetchPublicStats`** (live stats map-reduce); **`GetHostProfile`** (admin settings panel). |
+| **Configuration** | **`OLLAMA_HOST`**, model name, timeout, max tokens via env; host profile exposed to admin; compose profile **`ai-dev`** in monorepo stack. Live stats: [`docs/operator-live-stats-map-reduce.md`](./docs/operator-live-stats-map-reduce.md). |
+
 | Start here       | Link                                                                                 |
 | ---------------- | ------------------------------------------------------------------------------------ |
 | **Security**     | [`docs/SECURITY.md`](./docs/SECURITY.md) — trust boundaries, auth, TLS, SSRF         |
