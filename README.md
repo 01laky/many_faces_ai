@@ -1,6 +1,7 @@
 # Many Faces AI service - gRPC Server
 
 <!-- readme-badges:start -->
+
 [![version](https://img.shields.io/badge/version-0.8.2-blue)](./VERSION)
 ![Python](https://img.shields.io/badge/Python-3.11-3776AB)
 ![gRPC](https://img.shields.io/badge/gRPC-1.80-244c5a)
@@ -8,9 +9,10 @@
 [![CI](https://github.com/01laky/many_faces_main/actions/workflows/ci.yml/badge.svg)](https://github.com/01laky/many_faces_main/actions/workflows/ci.yml)
 ![tests](https://img.shields.io/badge/tests-CI%20gated-brightgreen)
 ![platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)
+
 <!-- readme-badges:end -->
 
-**Version:** [`0.8.0`](./VERSION) · [Changelog](./CHANGELOG.md)
+**Version:** [`0.8.2`](./VERSION) · [Changelog](./CHANGELOG.md)
 
 **Author:** Ladislav Kostolny · [01laky@gmail.com](mailto:01laky@gmail.com)
 
