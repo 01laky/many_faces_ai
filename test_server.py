@@ -313,7 +313,18 @@ class TestGenerateWithStatsContext:
 		context = MagicMock()
 		context.code = lambda: None
 		context.details = lambda: None
+		context.time_remaining.return_value = 30.0
+		context.invocation_metadata.return_value = ()
 		return context
+
+	@staticmethod
+	def _ready_mock_ai(**kwargs):
+		mock_ai = MagicMock(**kwargs)
+		mock_ai.is_loading.return_value = False
+		mock_ai.is_unavailable.return_value = False
+		mock_ai.is_loaded.return_value = True
+		mock_ai.model_name = "test-model"
+		return mock_ai
 
 	def test_generate_returns_error_when_ai_service_unavailable(
 		self, servicer, mock_context, monkeypatch
@@ -328,8 +339,7 @@ class TestGenerateWithStatsContext:
 	def test_generate_prepends_stats_context_json_before_prompt(
 		self, servicer, mock_context, monkeypatch
 	):
-		mock_ai = MagicMock()
-		mock_ai.generate = MagicMock(return_value="ok")
+		mock_ai = self._ready_mock_ai(generate=MagicMock(return_value="ok"))
 		monkeypatch.setattr(server, "_ai_service", mock_ai)
 		req = health_pb2.GenerateRequest(prompt="User: hi\nAI:", max_new_tokens=12)
 		req.stats_context_json = '{"usersCount":3}'
@@ -343,8 +353,7 @@ class TestGenerateWithStatsContext:
 		assert full_prompt.endswith("User: hi\nAI:")
 
 	def test_generate_passes_response_locale_to_model(self, servicer, mock_context, monkeypatch):
-		mock_ai = MagicMock()
-		mock_ai.generate = MagicMock(return_value="ok")
+		mock_ai = self._ready_mock_ai(generate=MagicMock(return_value="ok"))
 		monkeypatch.setattr(server, "_ai_service", mock_ai)
 		req = health_pb2.GenerateRequest(prompt="User: hi\nAI:", max_new_tokens=12)
 		req.response_locale = "en"
@@ -378,8 +387,7 @@ class TestGenerateWithStatsContext:
 	def test_generate_stats_context_whitespace_only_behaves_like_absent(
 		self, servicer, mock_context, monkeypatch
 	):
-		mock_ai = MagicMock()
-		mock_ai.generate = MagicMock(return_value="y")
+		mock_ai = self._ready_mock_ai(generate=MagicMock(return_value="y"))
 		monkeypatch.setattr(server, "_ai_service", mock_ai)
 		req = health_pb2.GenerateRequest(prompt="User: z\nAI:", max_new_tokens=10)
 		req.stats_context_json = "   \n\t  "

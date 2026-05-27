@@ -24,7 +24,7 @@ def test_aih1_t_f02_long_prompt_truncated_in_redaction():
 def test_aih1_t_f03_review_content_log_line_has_no_raw_body(caplog):
 	from server import HealthServiceServicer
 
-	caplog.set_level(logging.INFO, logger="server")
+	caplog.set_level(logging.INFO, logger="handlers.rpc_handlers")
 	servicer = HealthServiceServicer()
 	request = type(
 		"Req",

@@ -44,6 +44,10 @@ def env_float(name: str, default: float) -> float:
 		return default
 
 
+def env_str(name: str, default: str = "") -> str:
+	return os.getenv(name, default).strip()
+
+
 def ollama_base_url() -> str:
 	return os.getenv("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL).rstrip("/")
 

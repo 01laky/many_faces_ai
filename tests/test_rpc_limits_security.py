@@ -10,11 +10,15 @@ from utils.rpc_rate_limit import check_rpc_rate_limit, reset_rpc_rate_limit_for_
 
 
 def test_aih1_t_c01_empty_generate_prompt():
+	import health_pb2
+
 	from server import HealthServiceServicer
 
 	servicer = HealthServiceServicer()
 	context = MagicMock()
-	request = MagicMock(prompt="   ")
+	context.time_remaining.return_value = 30.0
+	context.invocation_metadata.return_value = ()
+	request = health_pb2.GenerateRequest(prompt="   ")
 	response = servicer.Generate(request, context)
 	assert response.error == "prompt is required"
 

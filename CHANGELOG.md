@@ -8,6 +8,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — **version h
 
 | Version       | Theme                                 |
 | ------------- | ------------------------------------- |
+| [0.9.0](#090) | Capability roadmap AI-UP1…UP20      |
 | [0.8.0](#080) | Phase A refactor, proto pin           |
 | [0.7.0](#070) | AIH1 gRPC TLS and token               |
 | [0.6.0](#060) | Live stats, host profile              |
@@ -24,6 +25,32 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — **version h
 ### Changed
 
 ### Fixed
+
+---
+
+## [0.9.0]
+
+### Added
+
+- Capability roadmap v0.9.0 (**AI-UP1…UP20**): LLM moderation path, Phase B `RpcHandlers`,
+  `BuildFaceContextSnapshot`, `ChatRiskScore`, `GenerateStream`, `GenerateReport`, `EmbedText`,
+  `ExplainDecision`; model routing, Ollama circuit breaker, metrics/trace/usage helpers.
+- Proto extensions: `search_hits_json`, `error_code`, moderation eligibility fields; deprecate
+  `OperatorStatsChat` in comments.
+- Docs: `docs/capability-roadmap-v0.9.0.md` and topic guides (LLM, search, embeddings, mTLS, media).
+- Tests: `tests/test_capability_roadmap_up.py`, `tests/test_moderation_sanitize_corpus.py`.
+- Monorepo script: `scripts/verify-moderation-corpus-parity.mjs` (AI-UP17).
+
+### Changed
+
+- `server.py` delegates RPCs to `handlers/rpc_handlers.py`; health JSON includes `schemaVersion`.
+- `Generate` validates prompt before composing search/stats blocks; English error strings.
+- Chat risk scorer flags spam and external links per AI-UP4 policy.
+
+### Fixed
+
+- `ReviewContent` logging uses `title_len`/`body_len` only (AIH1 redaction).
+- Dynamic `_ai_service` resolution for tests and runtime monkeypatching.
 
 ---
 

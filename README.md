@@ -2,7 +2,7 @@
 
 <!-- readme-badges:start -->
 
-[![version](https://img.shields.io/badge/version-0.8.2-blue)](./VERSION)
+[![version](https://img.shields.io/badge/version-0.9.0-blue)](./VERSION)
 ![Python](https://img.shields.io/badge/Python-3.11-3776AB)
 ![gRPC](https://img.shields.io/badge/gRPC-1.80-244c5a)
 ![Ollama](https://img.shields.io/badge/Ollama-host-black)
@@ -12,7 +12,7 @@
 
 <!-- readme-badges:end -->
 
-**Version:** [`0.8.2`](./VERSION) · [Changelog](./CHANGELOG.md)
+**Version:** [`0.9.0`](./VERSION) · [Changelog](./CHANGELOG.md) · [Capability roadmap v0.9.0](./docs/capability-roadmap-v0.9.0.md)
 
 **Author:** Ladislav Kostolny · [01laky@gmail.com](mailto:01laky@gmail.com)
 
@@ -23,7 +23,7 @@
 | Pillar              | Highlights                                                                                                                                                                                                                                                            |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Security (AIH1)** | Internal **gRPC only**; optional **`x-ai-worker-token`** metadata; **TLS** via `GRPC_TLS_CERT_FILE`; SSRF guards on public stats fetch; moderation output sanitization. CI: `node ../scripts/verify-ai-security-tests.mjs`. [`docs/SECURITY.md`](./docs/SECURITY.md). |
-| **AI capabilities** | **`Generate`** (operator chat + optional `stats_context_json`); **`ReviewContent`** (structured moderation for albums/blogs/reels); **`OperatorStatsChat`** / **`FetchPublicStats`** (live stats map-reduce); **`GetHostProfile`** (admin settings panel).            |
+| **AI capabilities** | **`Generate`** / **`GenerateStream`**; **`ReviewContent`** (rules + optional LLM); **`ChatRiskScore`**; **`BuildFaceContextSnapshot`**; **`GenerateReport`**; **`EmbedText`**; **`ExplainDecision`**; **`GetHostProfile`**; legacy **`OperatorStatsChat`** (deprecated). |
 | **Configuration**   | **`OLLAMA_HOST`**, model name, timeout, max tokens via env; host profile exposed to admin; compose profile **`ai-dev`** in monorepo stack. Live stats: [`docs/operator-live-stats-map-reduce.md`](./docs/operator-live-stats-map-reduce.md).                          |
 
 | Start here       | Link                                                                                 |

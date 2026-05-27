@@ -11,7 +11,6 @@ Usage:
     ./server.py
 """
 
-import json
 import logging
 import os
 import sys
@@ -87,15 +86,9 @@ except (ImportError, ModuleNotFoundError, FileNotFoundError) as e:
 	)
 	raise ImportError("gRPC stubs missing or invalid; run ./generate_proto.sh from ai_demo/") from e
 
-from services.content_review_classifier import review_content_normalized  # noqa: E402
-from services.operator_stats_prompt import (  # noqa: E402
-	compose_operator_chat_prompt as _compose_operator_chat_prompt,
-	stats_context_prefix as _stats_context_prefix,
-)
-from services.public_stats_fetcher import fetch_public_stats  # noqa: E402
+from handlers.rpc_handlers import RpcHandlers  # noqa: E402
 from utils.grpc_worker_auth import WorkerAuthInterceptor, expected_token_from_env  # noqa: E402
 from utils.log_redaction import redact_sensitive  # noqa: E402
-from utils.rpc_limits import MAX_PROMPT_CHARS, clamp_max_new_tokens  # noqa: E402
 from utils.rpc_rate_limit import check_rpc_rate_limit  # noqa: E402
 from utils.validate_worker_env import WorkerEnvValidationError, validate_worker_env  # noqa: E402
 
@@ -122,26 +115,6 @@ def _grpc_message_size_options() -> list[tuple[str, int]]:
 	]
 
 
-def _model_status_payload() -> dict:
-	if _ai_service is None:
-		return {
-			"ready": False,
-			"loading": False,
-			"unavailable": True,
-			"modelName": None,
-		}
-	payload = {
-		"ready": _ai_service.is_loaded(),
-		"loading": _ai_service.is_loading(),
-		"unavailable": _ai_service.is_unavailable(),
-		"modelName": _ai_service.model_name,
-	}
-	err = _ai_service.load_error()
-	if err:
-		payload["error"] = redact_sensitive(err, max_len=200)
-	return payload
-
-
 def _preload_model_blocking() -> bool:
 	"""Load weights before accepting traffic (avoids OOM restart loop during background load)."""
 	flag = os.getenv("MFAI_PRELOAD_MODEL", "1").strip().lower()
@@ -160,224 +133,57 @@ def _preload_model_blocking() -> bool:
 
 
 class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
-	"""
-	Implementation of the HealthService gRPC service.
+	"""HealthService gRPC servicer — delegates to RpcHandlers (AI-UP2 Phase B)."""
 
-	This class handles health check requests from clients.
-	"""
+	def __init__(self) -> None:
+		self._handlers = RpcHandlers(lambda: _ai_service, health_pb2, collect_host_profile)
 
 	@staticmethod
 	def _rate_limited(method: str) -> tuple[bool, str]:
 		return check_rpc_rate_limit(method)
 
 	def HealthCheck(self, request, context):
-		"""
-		Health check RPC method.
-
-		This method is called when a client requests a health check.
-		It returns a success response if the server is running and ready.
-
-		Args:
-			request: HealthCheckRequest message (currently unused)
-			context: gRPC context
-
-		Returns:
-			HealthCheckResponse with status="success" if server is operational
-		"""
-		logger.info("Health check requested")
-		status = _model_status_payload()
-		return health_pb2.HealthCheckResponse(
-			status="success",
-			message=json.dumps(status),
-		)
+		return self._handlers.health_check(request, context)
 
 	def GetHostProfile(self, request, context):
-		"""Return a JSON host hardware/OS snapshot collected on this machine."""
-		logger.info("GetHostProfile requested")
-		try:
-			model_name = _ai_service.model_name if _ai_service is not None else None
-			profile = collect_host_profile(model_name)
-			if not profile:
-				return health_pb2.HostProfileResponse(error="host profile unavailable")
-			return health_pb2.HostProfileResponse(
-				json_body=json.dumps(profile, ensure_ascii=False),
-			)
-		except Exception as exc:
-			logger.debug("GetHostProfile failed: %s", redact_sensitive(str(exc)), exc_info=True)
-			return health_pb2.HostProfileResponse(error="host profile unavailable")
+		return self._handlers.get_host_profile(request, context)
 
 	def Generate(self, request, context):
-		"""
-		AI text generation RPC method.
+		return self._handlers.generate(request, context)
 
-		Completes the given prompt using the configured local Qwen model.
-		The model is loaded into memory on first call (lazy loading).
-
-		Args:
-			request: GenerateRequest with prompt and optional max_new_tokens
-			context: gRPC context
-
-		Returns:
-			GenerateResponse with generated text (text field) or error message (error field)
-		"""
-		ok, rate_err = self._rate_limited("Generate")
-		if not ok:
-			return health_pb2.GenerateResponse(text="", error=rate_err)
-
-		prompt_len = len(request.prompt or "")
-		logger.info("Generate requested, prompt length=%d", prompt_len)
-		if _ai_service is None:
-			return health_pb2.GenerateResponse(
-				text="",
-				error="AIModelService not available (Ollama adapter import failed)",
-			)
-		prompt = (request.prompt or "").strip()
-		if not prompt:
-			return health_pb2.GenerateResponse(text="", error="prompt is required")
-		stats_block = ""
-		if request.HasField("stats_context_json"):
-			js = (request.stats_context_json or "").strip()
-			if js:
-				# Keep stats as a separate, parseable prefix. AIModelService later moves this
-				# block into a system message immediately before the latest user question.
-				stats_block = _stats_context_prefix(js)
-		full_prompt = stats_block + prompt
-		if len(full_prompt) > MAX_PROMPT_CHARS:
-			return health_pb2.GenerateResponse(text="", error="prompt too long")
-		max_new_tokens = clamp_max_new_tokens(
-			request.max_new_tokens if request.max_new_tokens > 0 else 0
-		)
-		response_locale = None
-		if request.HasField("response_locale"):
-			rl = (request.response_locale or "").strip()
-			if rl:
-				response_locale = rl
-		deadline_seconds = context.time_remaining()
-		try:
-			text = _ai_service.generate(
-				full_prompt,
-				max_new_tokens=max_new_tokens,
-				response_locale=response_locale,
-				rpc_deadline_seconds=deadline_seconds,
-			)
-			return health_pb2.GenerateResponse(text=text)
-		except RuntimeError as e:
-			err = str(e)
-			if "MODEL_LOADING" in err:
-				logger.info("Model is still loading, returning friendly message")
-				return health_pb2.GenerateResponse(
-					text="⏳ AI model sa práve načítava do pamäte. Skúste to prosím o chvíľu znova."
-				)
-			if "MODEL_LOAD_FAILED" in err:
-				logger.warning("Model load previously failed: %s", redact_sensitive(err))
-				return health_pb2.GenerateResponse(
-					text="",
-					error="AI model sa nepodarilo načítať cez Ollama. Skontrolujte, či Ollama beží a model OLLAMA_MODEL je stiahnutý.",
-				)
-			logger.exception("Generate failed: %s", redact_sensitive(err))
-			return health_pb2.GenerateResponse(text="", error="generation failed")
+	def GenerateStream(self, request, context):
+		yield from self._handlers.generate_stream(request, context)
 
 	def FetchPublicStats(self, request, context):
-		"""HTTP GET of a configured absolute URL (intended for BeDemo public stats JSON)."""
-		body, error = fetch_public_stats(request.absolute_url or "")
-		if error:
-			return health_pb2.FetchPublicStatsResponse(error=error)
-		return health_pb2.FetchPublicStatsResponse(json_body=body)
+		return self._handlers.fetch_public_stats(request, context)
 
 	def OperatorStatsChat(self, request, context):
-		"""Optional path: fetch live JSON then run the same Generate path with a composed prompt."""
-		ok, rate_err = self._rate_limited("OperatorStatsChat")
-		if not ok:
-			return health_pb2.GenerateResponse(text="", error=rate_err)
-
-		stats_json = ""
-		if request.fetch_live_public_snapshot:
-			u = (request.public_stats_absolute_url or "").strip()
-			if not u:
-				return health_pb2.GenerateResponse(
-					text="", error="public_stats_absolute_url is required for live mode"
-				)
-			fr = self.FetchPublicStats(health_pb2.FetchPublicStatsRequest(absolute_url=u), context)
-			if fr.error:
-				return health_pb2.GenerateResponse(text="", error=fr.error)
-			stats_json = (fr.json_body or "").strip()
-
-		user_msg = (request.user_message or "").strip()
-		if not user_msg:
-			return health_pb2.GenerateResponse(text="", error="user_message is required")
-
-		max_tok = clamp_max_new_tokens(
-			request.max_new_tokens if request.max_new_tokens > 0 else 150
-		)
-		composed = _compose_operator_chat_prompt(request.history_text or "", user_msg)
-		if len(composed) > MAX_PROMPT_CHARS:
-			return health_pb2.GenerateResponse(text="", error="prompt too long")
-		inner = health_pb2.GenerateRequest(prompt=composed, max_new_tokens=max_tok)
-		if stats_json:
-			inner.stats_context_json = stats_json
-		return self.Generate(inner, context)
+		return self._handlers.operator_stats_chat(request, context)
 
 	def ReviewContent(self, request, context):
-		"""
-		Deterministic moderation recommendation used by the .NET worker (`ContentAiReviewService`).
+		return self._handlers.review_content(request, context)
 
-		Pipeline:
-		1. Concatenate title + body and run lightweight keyword classifiers (`_classify_text_signals`).
-		2. Inspect `media_url` for scheme + extension issues (`_classify_media_signals`).
-		3. Append integration-boundary flags for albums/reels (`image_analysis_boundary`, `video_analysis_boundary`)
-			so downstream systems can see that a future heavyweight image/video model is not yet applied here.
-		4. Split `policy_flags` (everything except boundary markers) to decide risk/decision; boundary flags alone
-			never force rejection—they document future work while keeping safe content approvable.
+	def BuildFaceContextSnapshot(self, request, context):
+		return self._handlers.build_face_context_snapshot(request, context)
 
-		The backend still validates confidence/decision ranges and never auto-publishes solely on this response.
-		"""
-		ok, rate_err = self._rate_limited("ReviewContent")
-		if not ok:
-			return health_pb2.ContentReviewResponse(
-				decision="needs_human_review",
-				confidence=0.5,
-				risk_level="medium",
-				flags=["rate_limit"],
-				reason=rate_err,
-				user_message="Content review is temporarily unavailable.",
-				model_version="",
-				trace_id="",
-			)
+	def ChatRiskScore(self, request, context):
+		return self._handlers.chat_risk_score(request, context)
 
-		from moderation_input_sanitize import sanitize_for_review
+	def GenerateReport(self, request, context):
+		return self._handlers.generate_report(request, context)
 
-		content_type = (request.content_type or "").strip()
-		raw_title = request.title or ""
-		raw_body = request.body or ""
-		logger.info(
-			"ReviewContent requested content_type=%s title_len=%d body_len=%d",
-			content_type or "(none)",
-			len(raw_title),
-			len(raw_body),
-		)
-		title, body, media_url = sanitize_for_review(raw_title, raw_body, request.media_url or None)
-		result = review_content_normalized(
-			title,
-			body,
-			media_url,
-			content_type,
-		)
-		logger.info(
-			"ReviewContent completed trace_id=%s decision=%s confidence=%.2f",
-			result["trace_id"],
-			result["decision"],
-			result["confidence"],
-		)
-		return health_pb2.ContentReviewResponse(
-			decision=result["decision"],
-			confidence=result["confidence"],
-			risk_level=result["risk_level"],
-			flags=result["flags"],
-			reason=result["reason"],
-			user_message=result["user_message"],
-			model_version=result["model_version"],
-			trace_id=result["trace_id"],
-		)
+	def EmbedText(self, request, context):
+		return self._handlers.embed_text(request, context)
+
+	def ExplainDecision(self, request, context):
+		return self._handlers.explain_decision(request, context)
+
+
+def _model_status_payload() -> dict:
+	"""Health JSON payload (used by tests and admin probes)."""
+	return RpcHandlers(
+		lambda: _ai_service, health_pb2, collect_host_profile
+	)._model_status_payload()
 
 
 def serve():

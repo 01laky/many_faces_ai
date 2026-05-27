@@ -1,0 +1,12 @@
+"""Stable gRPC error codes for backend / portal mapping (AI-UP13, AI-UP19)."""
+
+OLLAMA_UNAVAILABLE = "ollama_unavailable"
+OLLAMA_CIRCUIT_OPEN = "ollama_circuit_open"
+MODEL_LOADING = "model_loading"
+MODEL_LOAD_FAILED = "model_load_failed"
+GENERATION_FAILED = "generation_failed"
+PROMPT_REQUIRED = "prompt_required"
+PROMPT_TOO_LONG = "prompt_too_long"
+RATE_LIMITED = "rate_limited"
+INVALID_ARGUMENT = "invalid_argument"
+SERVICE_UNAVAILABLE = "service_unavailable"
