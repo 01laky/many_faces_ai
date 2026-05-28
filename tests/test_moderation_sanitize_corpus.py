@@ -2,24 +2,17 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import pytest
 
 from moderation_input_sanitize import sanitize_for_review
-
-_CORPUS = (
-	Path(__file__).resolve().parents[2] / "docs" / "fixtures" / "moderation_sanitize_vectors.json"
-)
+from tests.moderation_sanitize_vectors_loader import corpus_path, load_moderation_sanitize_vectors
 
 
 @pytest.fixture(scope="module")
 def corpus_vectors():
-	if not _CORPUS.is_file():
-		pytest.skip(f"corpus missing: {_CORPUS}")
-	data = json.loads(_CORPUS.read_text(encoding="utf-8"))
-	return data["vectors"]
+	if not corpus_path().is_file():
+		pytest.skip(f"corpus missing: {corpus_path()}")
+	return load_moderation_sanitize_vectors()
 
 
 def test_ai_up17_u1_corpus_vectors_sanitize(corpus_vectors):
