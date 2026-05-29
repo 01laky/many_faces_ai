@@ -4,6 +4,19 @@ Optional LLM path for **`ReviewContent`** when **`MFAI_LLM_MODERATION=1`**.
 
 ## Decision flow
 
+```mermaid
+flowchart TD
+  In[Untrusted title/body/media] --> San[moderation_input_sanitize]
+  San --> Rules[Rules classifier]
+  Rules -->|high-confidence reject| OutReject[reject advisory]
+  Rules -->|needs_human_review or boundary| LLM{MFAI_LLM_MODERATION=1?}
+  LLM -->|yes| Ollama[review_with_llm via Ollama]
+  LLM -->|no| OutReview[needs_human_review]
+  Ollama -->|valid JSON| OutLLM[decision + decision_path=llm]
+  Ollama -->|parse fail| OutReview
+  Rules -->|approve path| OutApprove[approve advisory]
+```
+
 1. Rules classifier runs first (unchanged AIH1 behavior).
 2. High-confidence rules **reject** skips LLM (`MODERATION_RULES_AUTO_THRESHOLD`, default `0.88`).
 3. **`needs_human_review`** or boundary-only flags invoke **`review_with_llm`**.

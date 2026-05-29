@@ -76,6 +76,9 @@ Smoke script: `./scripts/smoke-grpc-tls.sh` (plaintext HealthCheck + TLS path wh
 | `MFAI_HEALTHCHECK_REQUIRES_TOKEN` | Optional | `0` | Lock down HealthCheck |
 | `OLLAMA_BASE_URL` | Yes | `http://host.docker.internal:11434` | Hardened allow-list only |
 | `OLLAMA_MODEL` | Yes | `qwen2.5:7b-instruct-q4_K_M` | Local model name |
+| `MFAI_LLM_MODERATION` | No | `0` | Enable LLM moderation path (**0.9.0**) |
+| `OLLAMA_MODEL_MODERATION` | No | falls back to `OLLAMA_MODEL` | Moderation model profile |
+| `MODERATION_RULES_AUTO_THRESHOLD` | No | `0.88` | Skip LLM when rules reject with high confidence |
 | `MFAI_ALLOW_HTTP_LOOPBACK` | Dev only | implicit in dev | HTTP stats fetch to 127.0.0.1 |
 | `AIH1_RPC_RATE_PER_MIN` | Optional | unset | In-process rate limit |
 | `PORT` | No | `50051` | gRPC listen port |
@@ -90,7 +93,13 @@ See [`.env.example`](../.env.example) for the full list.
 | `Generate` | Trusted operator | Ollama | Required |
 | `OperatorStatsChat` | Trusted operator | Ollama + optional stats URL | Required |
 | `FetchPublicStats` | URL string | HTTPS (SSRF policy) | Required |
-| `ReviewContent` | **Untrusted** creator fields | None | Required |
+| `ReviewContent` | **Untrusted** creator fields | Optional Ollama (LLM path) | Required |
+| `GenerateStream` | Trusted operator | Ollama stream | Required |
+| `BuildFaceContextSnapshot` | Trusted operator | Ollama + DB context | Required |
+| `ChatRiskScore` | Trusted operator | Ollama | Required |
+| `GenerateReport` | Trusted operator | Ollama | Required |
+| `EmbedText` | Trusted operator | Ollama embeddings | Required |
+| `ExplainDecision` | Trusted operator | Ollama | Required |
 | `GetHostProfile` | N/A | Local OS introspection | Required |
 
 ```mermaid
@@ -107,7 +116,8 @@ sequenceDiagram
 ## 8. ReviewContent / moderation
 
 - **`moderation_input_sanitize.py`** strips bidi/control chars; caps title 200, body 100k, media URL 2000 chars (PI-4 parity with backend).
-- Classifier is **deterministic** (keyword + media URL heuristics) — not LLM-based in v1.
+- **Rules classifier** runs first (deterministic keyword + media URL heuristics).
+- When **`MFAI_LLM_MODERATION=1`**, boundary cases invoke Ollama via **`review_with_llm`**; invalid JSON falls back to **`needs_human_review`**. See [`docs/moderation-llm-phase3.md`](./moderation-llm-phase3.md).
 - Worker output is **advisory**; backend validates ranges and owns final approval status.
 - Guide: [ai-assisted-content-approval.md](../../docs/guides/ai-assisted-content-approval.md)
 
@@ -134,10 +144,11 @@ Worker-side policy (`utils/outbound_url_policy.py`) mirrors backend `OutboundUrl
 
 | Track ID | Topic |
 | -------- | ----- |
-| `TRACK-AIH1-MTLS` | Full mutual TLS instead of shared metadata token |
-| `TRACK-AIH1-LLM-MOD` | LLM-based moderation classifier (Phase 3) |
+| `TRACK-AIH1-MTLS` | Full mutual TLS instead of shared metadata token — see [`docs/mtls.md`](./mtls.md) |
 | `TRACK-AIH1-REDIS` | Distributed rate limiting across worker replicas |
 | `TRACK-AIH1-HOST-PORT` | Removing dev compose `50051:50051` host publish |
+
+**Shipped (0.9.0):** LLM moderation path (**AI-UP1**), capability RPCs (**AI-UP1…20**). Roadmap: [`docs/capability-roadmap-v0.9.0.md`](./capability-roadmap-v0.9.0.md) · media pass: [`docs/moderation-media-pass.md`](./moderation-media-pass.md).
 
 ## 12. Reporting issues
 
