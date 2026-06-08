@@ -46,15 +46,15 @@ Inside the running container, `collect_host_profile()` merges this injected snap
 
 ## Environment
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `HOST_PROFILE_INJECTED_PATH` | `/app/injected/host_profile_injected.json` | JSON snapshot path inside the container |
-| `HOST_PROFILE_AGENT_URL` | `http://host.docker.internal:9765` | Host-side collector HTTP endpoint |
-| `HOST_PROFILE_AGENT_PORT` | `9765` | Port for `host_profile_agent.py` on the physical machine |
-| `HOST_NVIDIA_SMI_PATHS` | — | Extra comma-separated `nvidia-smi` paths (Windows `.exe` in Docker) |
-| `HOST_PROFILE_SCOPE` | `auto` | Force `host` or `container` when building snapshots |
-| `OLLAMA_BASE_URL` | `http://host.docker.internal:11434` | Ollama HTTP API |
-| `OLLAMA_MODEL` | `qwen2.5:7b-instruct-q4_K_M` | Configured model name |
+| Variable                     | Default                                    | Purpose                                                             |
+| ---------------------------- | ------------------------------------------ | ------------------------------------------------------------------- |
+| `HOST_PROFILE_INJECTED_PATH` | `/app/injected/host_profile_injected.json` | JSON snapshot path inside the container                             |
+| `HOST_PROFILE_AGENT_URL`     | `http://host.docker.internal:9765`         | Host-side collector HTTP endpoint                                   |
+| `HOST_PROFILE_AGENT_PORT`    | `9765`                                     | Port for `host_profile_agent.py` on the physical machine            |
+| `HOST_NVIDIA_SMI_PATHS`      | —                                          | Extra comma-separated `nvidia-smi` paths (Windows `.exe` in Docker) |
+| `HOST_PROFILE_SCOPE`         | `auto`                                     | Force `host` or `container` when building snapshots                 |
+| `OLLAMA_BASE_URL`            | `http://host.docker.internal:11434`        | Ollama HTTP API                                                     |
+| `OLLAMA_MODEL`               | `qwen2.5:7b-instruct-q4_K_M`               | Configured model name                                               |
 
 ## Dev topology (Mac backend + Windows AI)
 

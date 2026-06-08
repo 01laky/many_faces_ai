@@ -8,7 +8,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — **version h
 
 | Version       | Theme                                 |
 | ------------- | ------------------------------------- |
-| [0.9.0](#090) | Capability roadmap AI-UP1…UP20      |
+| [0.9.0](#090) | Capability roadmap AI-UP1…UP20        |
 | [0.8.0](#080) | Phase A refactor, proto pin           |
 | [0.7.0](#070) | AIH1 gRPC TLS and token               |
 | [0.6.0](#060) | Live stats, host profile              |

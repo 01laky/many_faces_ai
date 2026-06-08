@@ -32,22 +32,22 @@ flowchart LR
 
 ## 3. Who may call gRPC
 
-| Caller | Allowed |
-| ------ | ------- |
-| `many_faces_backend` worker client | Yes (intended production path) |
-| Portal / admin SPA | No direct gRPC |
-| Mobile app | No direct gRPC |
-| Public internet | No (keep off host firewall in prod) |
+| Caller                             | Allowed                             |
+| ---------------------------------- | ----------------------------------- |
+| `many_faces_backend` worker client | Yes (intended production path)      |
+| Portal / admin SPA                 | No direct gRPC                      |
+| Mobile app                         | No direct gRPC                      |
+| Public internet                    | No (keep off host firewall in prod) |
 
 ## 4. Authentication
 
 Metadata key: **`x-ai-worker-token`**
 
-| Profile | Behavior |
-| ------- | -------- |
-| **Dev** (default) | Auth disabled when `AI_WORKER_EXPECTED_TOKEN` is empty |
-| **Hardened** | `MFAI_REQUIRE_WORKER_AUTH=1` requires non-empty token at startup |
-| **HealthCheck** | Public by default (orchestration probes). Optional `MFAI_HEALTHCHECK_REQUIRES_TOKEN=1` requires token |
+| Profile           | Behavior                                                                                              |
+| ----------------- | ----------------------------------------------------------------------------------------------------- |
+| **Dev** (default) | Auth disabled when `AI_WORKER_EXPECTED_TOKEN` is empty                                                |
+| **Hardened**      | `MFAI_REQUIRE_WORKER_AUTH=1` requires non-empty token at startup                                      |
+| **HealthCheck**   | Public by default (orchestration probes). Optional `MFAI_HEALTHCHECK_REQUIRES_TOKEN=1` requires token |
 
 Token comparison uses constant-time `secrets.compare_digest`.
 
@@ -55,10 +55,10 @@ Align backend env: `AiService__WorkerAuthToken` ↔ `AI_WORKER_EXPECTED_TOKEN`.
 
 ## 5. TLS
 
-| Variable | Purpose |
-| -------- | ------- |
-| `GRPC_TLS_CERT_FILE` | Server certificate (PEM) |
-| `GRPC_TLS_KEY_FILE` | Server private key (PEM) |
+| Variable                     | Purpose                                         |
+| ---------------------------- | ----------------------------------------------- |
+| `GRPC_TLS_CERT_FILE`         | Server certificate (PEM)                        |
+| `GRPC_TLS_KEY_FILE`          | Server private key (PEM)                        |
 | `MFAI_ALLOW_INSECURE_GRPC=1` | Dev/hardened escape hatch when TLS files absent |
 
 Backend client should use HTTPS gRPC (`AiGrpcService` + `GrpcWorkerChannelFactory`).
@@ -67,40 +67,40 @@ Smoke script: `./scripts/smoke-grpc-tls.sh` (plaintext HealthCheck + TLS path wh
 
 ## 6. Environment variables
 
-| Name | Required in prod | Dev example | Notes |
-| ---- | ---------------- | ----------- | ----- |
-| `AI_WORKER_EXPECTED_TOKEN` | Yes (hardened) | *(empty = auth off)* | Never commit real values |
-| `MFAI_REQUIRE_WORKER_AUTH` | Yes | `0` | Fail startup if token missing |
-| `MFAI_ALLOW_INSECURE_GRPC` | No | `1` in dev compose | Required without TLS in hardened |
-| `GRPC_TLS_CERT_FILE` / `GRPC_TLS_KEY_FILE` | Recommended | — | Enable gRPC TLS listener |
-| `MFAI_HEALTHCHECK_REQUIRES_TOKEN` | Optional | `0` | Lock down HealthCheck |
-| `OLLAMA_BASE_URL` | Yes | `http://host.docker.internal:11434` | Hardened allow-list only |
-| `OLLAMA_MODEL` | Yes | `qwen2.5:7b-instruct-q4_K_M` | Local model name |
-| `MFAI_LLM_MODERATION` | No | `0` | Enable LLM moderation path (**0.9.0**) |
-| `OLLAMA_MODEL_MODERATION` | No | falls back to `OLLAMA_MODEL` | Moderation model profile |
-| `MODERATION_RULES_AUTO_THRESHOLD` | No | `0.88` | Skip LLM when rules reject with high confidence |
-| `MFAI_ALLOW_HTTP_LOOPBACK` | Dev only | implicit in dev | HTTP stats fetch to 127.0.0.1 |
-| `AIH1_RPC_RATE_PER_MIN` | Optional | unset | In-process rate limit |
-| `PORT` | No | `50051` | gRPC listen port |
+| Name                                       | Required in prod | Dev example                         | Notes                                           |
+| ------------------------------------------ | ---------------- | ----------------------------------- | ----------------------------------------------- |
+| `AI_WORKER_EXPECTED_TOKEN`                 | Yes (hardened)   | _(empty = auth off)_                | Never commit real values                        |
+| `MFAI_REQUIRE_WORKER_AUTH`                 | Yes              | `0`                                 | Fail startup if token missing                   |
+| `MFAI_ALLOW_INSECURE_GRPC`                 | No               | `1` in dev compose                  | Required without TLS in hardened                |
+| `GRPC_TLS_CERT_FILE` / `GRPC_TLS_KEY_FILE` | Recommended      | —                                   | Enable gRPC TLS listener                        |
+| `MFAI_HEALTHCHECK_REQUIRES_TOKEN`          | Optional         | `0`                                 | Lock down HealthCheck                           |
+| `OLLAMA_BASE_URL`                          | Yes              | `http://host.docker.internal:11434` | Hardened allow-list only                        |
+| `OLLAMA_MODEL`                             | Yes              | `qwen2.5:7b-instruct-q4_K_M`        | Local model name                                |
+| `MFAI_LLM_MODERATION`                      | No               | `0`                                 | Enable LLM moderation path (**0.9.0**)          |
+| `OLLAMA_MODEL_MODERATION`                  | No               | falls back to `OLLAMA_MODEL`        | Moderation model profile                        |
+| `MODERATION_RULES_AUTO_THRESHOLD`          | No               | `0.88`                              | Skip LLM when rules reject with high confidence |
+| `MFAI_ALLOW_HTTP_LOOPBACK`                 | Dev only         | implicit in dev                     | HTTP stats fetch to 127.0.0.1                   |
+| `AIH1_RPC_RATE_PER_MIN`                    | Optional         | unset                               | In-process rate limit                           |
+| `PORT`                                     | No               | `50051`                             | gRPC listen port                                |
 
 See [`.env.example`](../.env.example) for the full list.
 
 ## 7. RPC reference (security)
 
-| RPC | Input trust | Egress | Auth (hardened) |
-| --- | ----------- | ------ | --------------- |
-| `HealthCheck` | N/A | None | Optional (see §4) |
-| `Generate` | Trusted operator | Ollama | Required |
-| `OperatorStatsChat` | Trusted operator | Ollama + optional stats URL | Required |
-| `FetchPublicStats` | URL string | HTTPS (SSRF policy) | Required |
-| `ReviewContent` | **Untrusted** creator fields | Optional Ollama (LLM path) | Required |
-| `GenerateStream` | Trusted operator | Ollama stream | Required |
-| `BuildFaceContextSnapshot` | Trusted operator | Ollama + DB context | Required |
-| `ChatRiskScore` | Trusted operator | Ollama | Required |
-| `GenerateReport` | Trusted operator | Ollama | Required |
-| `EmbedText` | Trusted operator | Ollama embeddings | Required |
-| `ExplainDecision` | Trusted operator | Ollama | Required |
-| `GetHostProfile` | N/A | Local OS introspection | Required |
+| RPC                        | Input trust                  | Egress                      | Auth (hardened)   |
+| -------------------------- | ---------------------------- | --------------------------- | ----------------- |
+| `HealthCheck`              | N/A                          | None                        | Optional (see §4) |
+| `Generate`                 | Trusted operator             | Ollama                      | Required          |
+| `OperatorStatsChat`        | Trusted operator             | Ollama + optional stats URL | Required          |
+| `FetchPublicStats`         | URL string                   | HTTPS (SSRF policy)         | Required          |
+| `ReviewContent`            | **Untrusted** creator fields | Optional Ollama (LLM path)  | Required          |
+| `GenerateStream`           | Trusted operator             | Ollama stream               | Required          |
+| `BuildFaceContextSnapshot` | Trusted operator             | Ollama + DB context         | Required          |
+| `ChatRiskScore`            | Trusted operator             | Ollama                      | Required          |
+| `GenerateReport`           | Trusted operator             | Ollama                      | Required          |
+| `EmbedText`                | Trusted operator             | Ollama embeddings           | Required          |
+| `ExplainDecision`          | Trusted operator             | Ollama                      | Required          |
+| `GetHostProfile`           | N/A                          | Local OS introspection      | Required          |
 
 ```mermaid
 sequenceDiagram
@@ -111,7 +111,7 @@ sequenceDiagram
   AI-->>BE: decision, confidence, flags (advisory)
 ```
 
-**Proto change gate:** any new/changed RPC in `health.proto` needs a row here plus **AIH1-T-*** tests before merge.
+**Proto change gate:** any new/changed RPC in `health.proto` needs a row here plus **AIH1-T-\*** tests before merge.
 
 ## 8. ReviewContent / moderation
 
@@ -142,11 +142,11 @@ Worker-side policy (`utils/outbound_url_policy.py`) mirrors backend `OutboundUrl
 
 ## 11. Known limitations & deferrals
 
-| Track ID | Topic |
-| -------- | ----- |
-| `TRACK-AIH1-MTLS` | Full mutual TLS instead of shared metadata token — see [`docs/mtls.md`](./mtls.md) |
-| `TRACK-AIH1-REDIS` | Distributed rate limiting across worker replicas |
-| `TRACK-AIH1-HOST-PORT` | Removing dev compose `50051:50051` host publish |
+| Track ID               | Topic                                                                              |
+| ---------------------- | ---------------------------------------------------------------------------------- |
+| `TRACK-AIH1-MTLS`      | Full mutual TLS instead of shared metadata token — see [`docs/mtls.md`](./mtls.md) |
+| `TRACK-AIH1-REDIS`     | Distributed rate limiting across worker replicas                                   |
+| `TRACK-AIH1-HOST-PORT` | Removing dev compose `50051:50051` host publish                                    |
 
 **Shipped (0.9.0):** LLM moderation path (**AI-UP1**), capability RPCs (**AI-UP1…20**). Roadmap: [`docs/capability-roadmap-v0.9.0.md`](./capability-roadmap-v0.9.0.md) · media pass: [`docs/moderation-media-pass.md`](./moderation-media-pass.md).
 
@@ -156,4 +156,4 @@ Report security concerns in the **many_faces_main** monorepo issue tracker. Do n
 
 ---
 
-**CI:** `tests/**/*_security.py` with ids **AIH1-T-***; gate script `scripts/verify-ai-security-tests.mjs` (monorepo root).
+**CI:** `tests/**/*_security.py` with ids **AIH1-T-\***; gate script `scripts/verify-ai-security-tests.mjs` (monorepo root).

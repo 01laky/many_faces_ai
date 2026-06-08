@@ -4,11 +4,11 @@
 
 ## Limits
 
-| Env | Default | Meaning |
-| --- | ------- | ------- |
-| `OLLAMA_EMBED_MAX_BATCH` | `8` | Max texts per request |
-| `OLLAMA_EMBED_MAX_CHARS` | `8000` | Per-text character cap |
-| `OLLAMA_MODEL_EMBED` | falls back to `OLLAMA_MODEL` | Embedding model |
+| Env                      | Default                      | Meaning                |
+| ------------------------ | ---------------------------- | ---------------------- |
+| `OLLAMA_EMBED_MAX_BATCH` | `8`                          | Max texts per request  |
+| `OLLAMA_EMBED_MAX_CHARS` | `8000`                       | Per-text character cap |
+| `OLLAMA_MODEL_EMBED`     | falls back to `OLLAMA_MODEL` | Embedding model        |
 
 ## Errors
 

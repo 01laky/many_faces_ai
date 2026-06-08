@@ -24,12 +24,12 @@ flowchart TD
 
 ## Environment
 
-| Variable | Default | Purpose |
-| -------- | ------- | ------- |
-| `MFAI_LLM_MODERATION` | `0` | Enable LLM moderation |
-| `OLLAMA_MODEL_MODERATION` | falls back to `OLLAMA_MODEL` | Moderation model profile |
-| `MODERATION_RULES_AUTO_THRESHOLD` | `0.88` | Skip LLM when rules reject with high confidence |
-| `MFAI_LLM_MODERATION_SKIP_BOUNDARY` | unset | When `1`, skip LLM for boundary-only media flags |
+| Variable                            | Default                      | Purpose                                          |
+| ----------------------------------- | ---------------------------- | ------------------------------------------------ |
+| `MFAI_LLM_MODERATION`               | `0`                          | Enable LLM moderation                            |
+| `OLLAMA_MODEL_MODERATION`           | falls back to `OLLAMA_MODEL` | Moderation model profile                         |
+| `MODERATION_RULES_AUTO_THRESHOLD`   | `0.88`                       | Skip LLM when rules reject with high confidence  |
+| `MFAI_LLM_MODERATION_SKIP_BOUNDARY` | unset                        | When `1`, skip LLM for boundary-only media flags |
 
 ## Response fields
 

@@ -4,12 +4,12 @@
 
 ## Current (token + optional server TLS)
 
-| Env | Purpose |
-| --- | ------- |
-| `GRPC_TLS_CERT_FILE` / `GRPC_TLS_KEY_FILE` | Server TLS credentials |
-| `AI_WORKER_EXPECTED_TOKEN` | Metadata **`x-ai-worker-token`** |
-| `MFAI_HARDENED_PROFILE` | Require token; HTTPS-only outbound except loopback policy |
-| `MFAI_ALLOW_INSECURE_GRPC` | Dev-only plaintext gRPC |
+| Env                                        | Purpose                                                   |
+| ------------------------------------------ | --------------------------------------------------------- |
+| `GRPC_TLS_CERT_FILE` / `GRPC_TLS_KEY_FILE` | Server TLS credentials                                    |
+| `AI_WORKER_EXPECTED_TOKEN`                 | Metadata **`x-ai-worker-token`**                          |
+| `MFAI_HARDENED_PROFILE`                    | Require token; HTTPS-only outbound except loopback policy |
+| `MFAI_ALLOW_INSECURE_GRPC`                 | Dev-only plaintext gRPC                                   |
 
 ## Planned mTLS spike
 

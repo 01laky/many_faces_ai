@@ -20,7 +20,7 @@ Invalid JSON is ignored (graceful degrade).
 
 ## Environment
 
-| Variable | Purpose |
-| -------- | ------- |
+| Variable                     | Purpose                                     |
+| ---------------------------- | ------------------------------------------- |
 | `SEARCH_WORKER_GRPC_ADDRESS` | e.g. `search-worker:50052` (stub in v0.9.0) |
-| `SEARCH_WORKER_TOKEN` | Optional metadata token for worker auth |
+| `SEARCH_WORKER_TOKEN`        | Optional metadata token for worker auth     |
