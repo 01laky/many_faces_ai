@@ -11,6 +11,7 @@ import os
 import re
 import urllib.error
 import urllib.request
+from collections.abc import Iterator
 from datetime import UTC, datetime
 
 from utils.env import env_float, env_int, ollama_base_url
@@ -23,6 +24,20 @@ DEFAULT_MODEL_NAME = "qwen2.5:7b-instruct-q4_K_M"
 DEFAULT_MAX_NEW_TOKENS = 256
 # Safety cap even when backend requests more.
 DEFAULT_MAX_NEW_TOKENS_CAP = 384
+
+
+def _keep_alive() -> str:
+	"""
+	7B-perf O1: how long Ollama keeps the model resident after a request.
+
+	The worker runs against a dedicated PC whose only job is to host the 7B
+	operator model, so the cheapest path to low first-token latency is to keep
+	the model permanently loaded ("-1" = never evict). The old "30m" default
+	forced a multi-second cold reload whenever the operator paused between
+	questions. Operators can still override via OLLAMA_KEEP_ALIVE (e.g. "30m"
+	on a shared dev box where VRAM must be released).
+	"""
+	return os.getenv("OLLAMA_KEEP_ALIVE", "-1")
 
 
 def _thread_count() -> int:
@@ -312,7 +327,13 @@ class AIModelService:
 				f"{self._ollama_base_url}: {self._load_error}"
 			)
 
-	def _ollama_options(self, max_new_tokens: int) -> dict:
+	def _ollama_options(
+		self,
+		max_new_tokens: int,
+		*,
+		temperature: float | None = None,
+		stop: list[str] | None = None,
+	) -> dict:
 		options = {
 			"num_ctx": env_int("OLLAMA_NUM_CTX", 4096),
 			"num_predict": max_new_tokens,
@@ -333,6 +354,18 @@ class AIModelService:
 				options[option_name] = int(raw)
 			except ValueError:
 				logger.warning("Ignoring invalid %s=%r", env_name, raw)
+		# 7B-perf O11: per-call sampling overrides. The backend's terse per-bundle
+		# MAP step wants a low, deterministic temperature plus hard stop sequences so
+		# the model cannot ramble past the structured answer. These overrides apply
+		# only to THIS call; when absent we keep the worker's fluent chat defaults
+		# above. temperature is clamped to >= 0 (a negative value is meaningless and
+		# treated as "not provided").
+		if temperature is not None and temperature >= 0:
+			options["temperature"] = float(temperature)
+		if stop:
+			# Only forward a non-empty list; an empty `stop` would tell Ollama to
+			# never stop early, which is the opposite of the intended default.
+			options["stop"] = list(stop)
 		return options
 
 	def _generate_ollama(
@@ -341,13 +374,22 @@ class AIModelService:
 		max_new_tokens: int,
 		*,
 		rpc_deadline_seconds: float | None = None,
+		temperature: float | None = None,
+		stop: list[str] | None = None,
+		model: str | None = None,
 	) -> str:
+		# 7B-perf O19: per-call model override. The backend may route a tiny
+		# routing/gating decision to a smaller CPU-resident helper model. We use the
+		# override for THIS call only and never mutate self._model_name (so the
+		# expensive 7B model stays the instance default).
+		call_model = model.strip() if model and model.strip() else self._model_name
 		payload = {
-			"model": self._model_name,
+			"model": call_model,
 			"messages": messages,
 			"stream": False,
-			"keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
-			"options": self._ollama_options(max_new_tokens),
+			# 7B-perf O1: keep the model resident between calls (see _keep_alive()).
+			"keep_alive": _keep_alive(),
+			"options": self._ollama_options(max_new_tokens, temperature=temperature, stop=stop),
 		}
 		data = self._ollama_post_json(
 			"/api/chat",
@@ -404,6 +446,10 @@ class AIModelService:
 		max_new_tokens: int | None = None,
 		response_locale: str | None = None,
 		rpc_deadline_seconds: float | None = None,
+		*,
+		temperature: float | None = None,
+		stop: list[str] | None = None,
+		model: str | None = None,
 	) -> str:
 		if not prompt or not prompt.strip():
 			return ""
@@ -416,16 +462,114 @@ class AIModelService:
 			messages.append({"role": "user", "content": prompt.strip()})
 
 		try:
+			# 7B-perf O11/O19: pass the per-call sampling + model overrides straight
+			# through to the Ollama payload builder.
 			response = self._generate_ollama(
 				messages,
 				max_tok,
 				rpc_deadline_seconds=rpc_deadline_seconds,
+				temperature=temperature,
+				stop=stop,
+				model=model,
 			)
 			last_user = _last_user_message_from_messages(messages)
 			return _sanitize_assistant_reply(response, last_user)
 		except Exception as e:
 			logger.exception("Error generating text: %s", redact_sensitive(str(e)))
 			return ""
+
+	def generate_stream(
+		self,
+		prompt: str,
+		max_new_tokens: int | None = None,
+		*,
+		response_locale: str | None = None,
+		temperature: float | None = None,
+		stop: list[str] | None = None,
+		model: str | None = None,
+		rpc_deadline_seconds: float | None = None,
+	) -> Iterator[str]:
+		"""
+		7B-perf O4: TRUE token streaming from Ollama.
+
+		Unlike generate() (which blocks until the full completion is ready and then
+		sanitizes it), this opens Ollama's /api/chat with "stream": true and yields
+		each message-content delta as soon as it arrives over the wire. The caller
+		(the GenerateStream gRPC handler) re-emits each delta to the operator so the
+		UI paints tokens incrementally — the whole point of streaming is lower
+		time-to-first-token, so we deliberately do NOT buffer or post-process here.
+
+		Inputs:
+		- prompt: backend-composed chat prompt ("User: …\nAI: …").
+		- max_new_tokens: soft cap, clamped to the worker's safety ceiling.
+		- temperature/stop: per-call sampling overrides (O11), same semantics as
+			_ollama_options().
+		- model: per-call model override (O19); falls back to the instance default
+			without mutating it.
+
+		Yields raw content deltas (str). May yield "" deltas which the caller skips.
+		Raises RuntimeError on transport/HTTP errors so the handler can fall back to
+		the non-streaming chunked path instead of hard-failing the stream.
+		"""
+		if not prompt or not prompt.strip():
+			return
+
+		self._ensure_loaded()
+		max_tok = self._cap_max_tokens(max_new_tokens)
+
+		messages = self._parse_prompt(prompt, response_locale=response_locale)
+		if len(messages) <= 1:
+			messages.append({"role": "user", "content": prompt.strip()})
+
+		call_model = model.strip() if model and model.strip() else self._model_name
+		payload = {
+			"model": call_model,
+			"messages": messages,
+			"stream": True,
+			# O1: keep the streaming model resident too.
+			"keep_alive": _keep_alive(),
+			"options": self._ollama_options(max_tok, temperature=temperature, stop=stop),
+		}
+		body = json.dumps(payload).encode("utf-8")
+		req = urllib.request.Request(
+			f"{self._ollama_base_url}/api/chat",
+			data=body,
+			headers={"Content-Type": "application/json"},
+			method="POST",
+		)
+		timeout = self._ollama_timeout_seconds
+		if rpc_deadline_seconds is not None and rpc_deadline_seconds > 0:
+			timeout = min(timeout, rpc_deadline_seconds)
+
+		try:
+			# Ollama streams newline-delimited JSON objects (NDJSON). Iterating the
+			# urllib response object yields one raw line per loop, so we json.loads
+			# each line and pull message.content. We stop as soon as Ollama signals
+			# done=true (the final line also carries timing metadata, not content).
+			with urllib.request.urlopen(req, timeout=timeout) as resp:
+				for raw_line in resp:
+					line = raw_line.decode("utf-8", errors="replace").strip()
+					if not line:
+						continue
+					try:
+						data = json.loads(line)
+					except json.JSONDecodeError:
+						# Skip malformed partial lines defensively rather than abort.
+						continue
+					if not isinstance(data, dict):
+						continue
+					message = data.get("message")
+					if isinstance(message, dict):
+						delta = message.get("content")
+						if delta:
+							yield str(delta)
+					if data.get("done"):
+						break
+		except urllib.error.HTTPError as exc:
+			detail = redact_sensitive(exc.read().decode("utf-8", errors="replace"))
+			raise RuntimeError(f"Ollama HTTP {exc.code}: {detail}") from exc
+		except urllib.error.URLError as exc:
+			raise RuntimeError(f"Ollama stream transport error: {exc.reason}") from exc
 
 	def is_loaded(self) -> bool:
 		return self._ollama_model_available()

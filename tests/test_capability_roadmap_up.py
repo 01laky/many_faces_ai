@@ -227,30 +227,47 @@ class TestAIUP9DeprecatedRpc:
 		assert resp.text == "42"
 
 
+class _StreamingFakeAI:
+	"""Ready AIModelService stand-in for streaming tests (a real class, since the
+	RpcHandlers._ai getter invokes callables — a MagicMock would mis-resolve)."""
+
+	model_name = "test"
+
+	def __init__(self, deltas):
+		self._deltas = deltas
+
+	def is_loading(self) -> bool:
+		return False
+
+	def is_unavailable(self) -> bool:
+		return False
+
+	def is_loaded(self) -> bool:
+		return True
+
+	def load_error(self):
+		return None
+
+	def generate_stream(self, *_args, **_kwargs):
+		yield from self._deltas
+
+
 class TestAIUP10Streaming:
 	def test_ai_up10_u1_stream_yields_chunks(self, handlers, pb2, ctx):
+		# 7B-perf O4: real token streaming now drives generate_stream via the service.
 		req = pb2.GenerateRequest(prompt="Hello", max_new_tokens=10)
-		with patch.object(
-			handlers,
-			"generate",
-			return_value=pb2.GenerateResponse(text="Hello world stream " * 4),
-		):
-			chunks = list(handlers.generate_stream(req, ctx))
+		handlers._ai = _StreamingFakeAI(["Hello ", "world ", "stream"])
+		chunks = list(handlers.generate_stream(req, ctx))
 		assert len(chunks) >= 2
 		assert chunks[-1].is_final is True
 
 	def test_ai_up10_u2_stream_error_propagates(self, handlers, pb2, ctx):
-		req = pb2.GenerateRequest(prompt="Hi", max_new_tokens=5)
-		with patch.object(
-			handlers,
-			"generate",
-			return_value=pb2.GenerateResponse(
-				text="", error="prompt is required", error_code=PROMPT_REQUIRED
-			),
-		):
-			chunks = list(handlers.generate_stream(req, ctx))
+		# Empty prompt is rejected before reaching the service -> one terminal chunk.
+		req = pb2.GenerateRequest(prompt="  ", max_new_tokens=5)
+		chunks = list(handlers.generate_stream(req, ctx))
 		assert len(chunks) == 1
 		assert chunks[0].error_code == PROMPT_REQUIRED
+		assert chunks[0].is_final is True
 
 
 class TestAIUP11Reports:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from urllib import error, request
 
 from utils.env import env_int, ollama_base_url
@@ -35,7 +36,16 @@ def embed_texts(
 
 def _embed_one(text: str, model_name: str) -> tuple[list[float], str | None]:
 	url = f"{ollama_base_url()}/api/embeddings"
-	payload = json.dumps({"model": model_name, "prompt": text}).encode("utf-8")
+	# 7B-perf O1: keep the embedding model resident on the dedicated PC so repeated
+	# RAG indexing/query batches do not pay a cold-load each time. Default "-1"
+	# (never evict); overridable via OLLAMA_KEEP_ALIVE to match the chat model.
+	payload = json.dumps(
+		{
+			"model": model_name,
+			"prompt": text,
+			"keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "-1"),
+		}
+	).encode("utf-8")
 	req = request.Request(
 		url, data=payload, headers={"Content-Type": "application/json"}, method="POST"
 	)

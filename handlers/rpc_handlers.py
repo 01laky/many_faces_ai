@@ -124,6 +124,25 @@ class RpcHandlers:
 		full = stats_block + search_block + prompt
 		return full, response_locale
 
+	def _generation_overrides(self, request) -> tuple[float | None, list[str], str | None]:
+		"""
+		7B-perf O11/O19: read the per-call sampling + model overrides from the proto.
+
+		These are proto3 `optional`/`repeated` fields, so we must guard scalar reads
+		with HasField (an unset optional otherwise reads back as the zero value, which
+		for temperature=0.0 would be indistinguishable from "deterministic sampling
+		requested"). `stop` is repeated, so an unset value is simply an empty list.
+
+		Returns (temperature_or_None, stop_list, model_or_None).
+		"""
+		temperature = request.temperature if request.HasField("temperature") else None
+		stop = list(request.stop)
+		model = request.model if request.HasField("model") else None
+		if model is not None and not model.strip():
+			# Empty string => treat as no override (use the worker's default model).
+			model = None
+		return temperature, stop, model
+
 	def generate(self, request, context):
 		start = time.monotonic()
 		ok, rate_err = self._rate_limited("Generate")
@@ -149,13 +168,17 @@ class RpcHandlers:
 		max_new_tokens = clamp_max_new_tokens(
 			request.max_new_tokens if request.max_new_tokens > 0 else 0
 		)
-		timer = UsageTimer("Generate", self._ai.model_name)
+		temperature, stop, model = self._generation_overrides(request)
+		timer = UsageTimer("Generate", model or self._ai.model_name)
 		try:
 			text = self._ai.generate(
 				full_prompt,
 				max_new_tokens=max_new_tokens,
 				response_locale=response_locale,
 				rpc_deadline_seconds=context.time_remaining(),
+				temperature=temperature,
+				stop=stop,
+				model=model,
 			)
 			if not circuit_breaker_disabled():
 				get_ollama_circuit_breaker().record_success()
@@ -191,7 +214,13 @@ class RpcHandlers:
 				text="", error="generation failed", error_code=err.GENERATION_FAILED
 			)
 
-	def generate_stream(self, request, context) -> Iterator[Any]:
+	def _stream_chunked_fallback(self, request, context) -> Iterator[Any]:
+		"""
+		7B-perf O4 fallback: the OLD behaviour — run the blocking generate() and
+		fan the full text out in fixed-size slices. Used when real token streaming
+		is unavailable (e.g. the Ollama build cannot stream) so the stream RPC never
+		hard-fails; the operator still gets a complete answer, just not incrementally.
+		"""
 		response = self.generate(request, context)
 		text = response.text or ""
 		if response.error:
@@ -209,6 +238,117 @@ class RpcHandlers:
 			yield self._pb2.GenerateStreamChunk(text_delta=part, is_final=is_final)
 		if not text:
 			yield self._pb2.GenerateStreamChunk(text_delta="", is_final=True)
+
+	def generate_stream(self, request, context) -> Iterator[Any]:
+		"""
+		7B-perf O4: TRUE server-side token streaming.
+
+		Runs the same gate as generate() (rate limit, prompt validation, ollama-ready
+		+ circuit-breaker check) then drives AIModelService.generate_stream(), which
+		yields raw content deltas from Ollama as they arrive. Each delta becomes a
+		non-final GenerateStreamChunk; we close with one is_final chunk carrying
+		finish_reason="stop".
+
+		Resilience:
+		- If the very first delta cannot be produced (real streaming unsupported),
+			we transparently fall back to the old chunked-generate path so the RPC
+			never hard-fails.
+		- Any error mid-stream collapses to exactly ONE terminal chunk with
+			is_final=True + error + error_code, and the circuit breaker is tripped.
+		"""
+		start = time.monotonic()
+		ok, rate_err = self._rate_limited("Generate")
+		if not ok:
+			increment("ai_grpc_requests_total", rpc="GenerateStream", status="rate_limited")
+			yield self._pb2.GenerateStreamChunk(
+				text_delta="", is_final=True, error=rate_err, error_code=err.RATE_LIMITED
+			)
+			return
+
+		set_trace_from_metadata(getattr(context, "invocation_metadata", lambda: None)())
+		if not (request.prompt or "").strip():
+			yield self._pb2.GenerateStreamChunk(
+				text_delta="",
+				is_final=True,
+				error="prompt is required",
+				error_code=err.PROMPT_REQUIRED,
+			)
+			return
+
+		full_prompt, response_locale = self._compose_full_prompt(request)
+		if len(full_prompt) > MAX_PROMPT_CHARS:
+			yield self._pb2.GenerateStreamChunk(
+				text_delta="",
+				is_final=True,
+				error="prompt too long",
+				error_code=err.PROMPT_TOO_LONG,
+			)
+			return
+
+		ready, msg, code = self._check_ollama_ready()
+		if not ready:
+			yield self._pb2.GenerateStreamChunk(
+				text_delta="", is_final=True, error=msg, error_code=code
+			)
+			return
+
+		max_new_tokens = clamp_max_new_tokens(
+			request.max_new_tokens if request.max_new_tokens > 0 else 0
+		)
+		temperature, stop, model = self._generation_overrides(request)
+		timer = UsageTimer("GenerateStream", model or self._ai.model_name)
+
+		# Open the upstream stream. If it raises *before* yielding anything (e.g. the
+		# Ollama build can't stream), fall back to the old chunked-generate path so the
+		# operator still gets a full answer. We buffer the completion length for the
+		# usage timer/metrics, mirroring the generate() handler.
+		emitted_any = False
+		completion_chars = 0
+		try:
+			stream = self._ai.generate_stream(
+				full_prompt,
+				max_new_tokens=max_new_tokens,
+				response_locale=response_locale,
+				temperature=temperature,
+				stop=stop,
+				model=model,
+				rpc_deadline_seconds=context.time_remaining(),
+			)
+			for delta in stream:
+				if not delta:
+					continue
+				emitted_any = True
+				completion_chars += len(delta)
+				yield self._pb2.GenerateStreamChunk(text_delta=delta, is_final=False)
+		except Exception as exc:  # noqa: BLE001 - terminal chunk must always be emitted
+			if not circuit_breaker_disabled():
+				get_ollama_circuit_breaker().record_failure()
+			# If streaming failed before producing any output, degrade gracefully to
+			# the chunked-generate behaviour instead of surfacing a hard error.
+			if not emitted_any:
+				logger.warning(
+					"GenerateStream falling back to chunked generate: %s", type(exc).__name__
+				)
+				increment("ai_grpc_requests_total", rpc="GenerateStream", status="fallback")
+				yield from self._stream_chunked_fallback(request, context)
+				return
+			logger.exception("GenerateStream failed mid-stream")
+			increment("ai_grpc_requests_total", rpc="GenerateStream", status="error")
+			yield self._pb2.GenerateStreamChunk(
+				text_delta="", is_final=True, error=str(exc), error_code=err.GENERATION_FAILED
+			)
+			return
+
+		# Stream completed cleanly. Record success + metrics like generate().
+		if not circuit_breaker_disabled():
+			get_ollama_circuit_breaker().record_success()
+		record = timer.finish(prompt_chars=len(full_prompt), completion_chars=completion_chars)
+		logger.info("GenerateStream ok duration_ms=%.1f", record.duration_ms, extra=log_extra())
+		increment("ai_grpc_requests_total", rpc="GenerateStream", status="ok")
+		observe_duration(
+			"ai_grpc_request_duration_seconds", time.monotonic() - start, rpc="GenerateStream"
+		)
+		yield self._pb2.GenerateStreamChunk(text_delta="", is_final=True, finish_reason="stop")
 
 	def fetch_public_stats(self, request, _context):
 		body, error = fetch_public_stats(request.absolute_url or "")

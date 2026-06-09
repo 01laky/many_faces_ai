@@ -11,6 +11,10 @@ PROFILE_MODERATION = "moderation"
 PROFILE_RISK = "risk"
 PROFILE_VISION = "vision"
 PROFILE_EMBED = "embed"
+# 7B-perf O19: small CPU-resident helper model for cheap routing/gating decisions
+# (the backend routes those calls here via the per-call model override) so the big
+# 7B chat model is reserved for operator-visible synthesis.
+PROFILE_HELPER = "helper"
 
 _PROFILE_ENV = {
 	PROFILE_CHAT: "OLLAMA_MODEL_CHAT",
@@ -18,6 +22,7 @@ _PROFILE_ENV = {
 	PROFILE_RISK: "OLLAMA_MODEL_RISK",
 	PROFILE_VISION: "OLLAMA_MODEL_VISION",
 	PROFILE_EMBED: "OLLAMA_MODEL_EMBED",
+	PROFILE_HELPER: "OLLAMA_MODEL_HELPER",
 }
 
 

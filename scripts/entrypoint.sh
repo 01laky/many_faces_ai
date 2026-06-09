@@ -28,4 +28,9 @@ if [ "$REQUIRE" = "1" ]; then
 	fi
 fi
 
+# 7B-perf O19: best-effort warm-up of the small helper model. Never fails startup
+# (the script always exits 0; `|| true` is belt-and-suspenders). The host Ollama
+# model store persists across rebuilds, so this only pulls when genuinely absent.
+python /app/scripts/pull_helper_model.py || true
+
 exec python -m server
