@@ -20,33 +20,37 @@
 
 ### Three pillars
 
-| Pillar              | Highlights                                                                                                                                                                                                                                                               |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Security (AIH1)** | Internal **gRPC only**; optional **`x-ai-worker-token`** metadata; **TLS** via `GRPC_TLS_CERT_FILE`; SSRF guards on public stats fetch; moderation output sanitization. CI: `node ../scripts/verify-ai-security-tests.mjs`. [`docs/SECURITY.md`](./docs/SECURITY.md).    |
-| **AI capabilities** | **`Generate`** / **`GenerateStream`**; **`ReviewContent`** (rules + optional LLM); **`ChatRiskScore`**; **`BuildFaceContextSnapshot`**; **`GenerateReport`**; **`EmbedText`**; **`ExplainDecision`**; **`GetHostProfile`**; legacy **`OperatorStatsChat`** (deprecated). |
-| **Configuration**   | **`OLLAMA_HOST`**, model name, timeout, max tokens via env; host profile exposed to admin; compose profile **`ai-dev`** in monorepo stack. Live stats: [`docs/operator-live-stats-map-reduce.md`](./docs/operator-live-stats-map-reduce.md).                             |
+| Pillar              | Highlights                                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Security (AIH1)** | Internal **gRPC only**; optional **`x-ai-worker-token`** metadata; **TLS** via `GRPC_TLS_CERT_FILE`; SSRF guards on public stats fetch; moderation output sanitization. CI: `node ../scripts/verify-ai-security-tests.mjs`. [`docs/SECURITY.md`](./docs/SECURITY.md).                                                                                                                          |
+| **AI capabilities** | **In use:** **`EmbedText`** (vectors that power the backend's RAG retrieval) + **`Generate`** (batched map+stitch operator chat); **`ReviewContent`** (advisory content moderation, rules + optional LLM); **`GetHostProfile`** / **`HealthCheck`** (infra). **Available, not yet wired:** `GenerateStream`, `ChatRiskScore`, `GenerateReport`, `BuildFaceContextSnapshot`, `ExplainDecision`. |
+| **Configuration**   | **`OLLAMA_HOST`**, generation + embedding model names, timeout, max tokens via env; host profile exposed to admin; compose profile **`ai-dev`** in monorepo stack. RAG: [`../docs/guides/operator-ai-rag-retrieval.md`](../docs/guides/operator-ai-rag-retrieval.md).                                                                                                                          |
 
-| Start here       | Link                                                                                 |
-| ---------------- | ------------------------------------------------------------------------------------ |
-| **Security**     | [`docs/SECURITY.md`](./docs/SECURITY.md) — trust boundaries, auth, TLS, SSRF         |
-| Run standalone   | `./scripts/start-dev.sh`                                                             |
-| Full stack       | `../scripts/start-all-dev.sh` from `many_faces_main`                                 |
-| gRPC port        | `localhost:50051`                                                                    |
-| Live stats guide | [`docs/operator-live-stats-map-reduce.md`](./docs/operator-live-stats-map-reduce.md) |
+| Start here     | Link                                                                                         |
+| -------------- | -------------------------------------------------------------------------------------------- |
+| **Security**   | [`docs/SECURITY.md`](./docs/SECURITY.md) — trust boundaries, auth, TLS, SSRF                 |
+| Run standalone | `./scripts/start-dev.sh`                                                                     |
+| Full stack     | `../scripts/start-all-dev.sh` from `many_faces_main`                                         |
+| gRPC port      | `localhost:50051`                                                                            |
+| RAG guide      | [`../docs/guides/operator-ai-rag-retrieval.md`](../docs/guides/operator-ai-rag-retrieval.md) |
 
 ```mermaid
 flowchart LR
-    be["many_faces_backend<br/>IAiGrpcService"] --> grpc["many_faces_ai<br/>Python gRPC"]
-    grpc --> ollama["Ollama host<br/>chat completion"]
-    be -->|"operator chat"| gen["Generate"]
-    be -->|"moderation jobs"| review["ReviewContent"]
-    be -->|"settings panel"| profile["GetHostProfile"]
+    be["many_faces_backend<br/>IAiGrpcService (orchestrator)"] --> grpc["many_faces_ai<br/>thin Python gRPC adapter"]
+    grpc --> ollama["Ollama host"]
+    be -->|"RAG: embed the question"| embed["EmbedText → nomic-embed-text"]
+    be -->|"RAG: answer one bundle"| gen["Generate → qwen2.5:7b"]
+    be -->|"content moderation"| review["ReviewContent"]
+    be -->|"infra"| profile["GetHostProfile / HealthCheck"]
+    embed --> grpc
     gen --> grpc
     review --> grpc
     profile --> grpc
 ```
 
-Python **gRPC adapter** providing **health checks**, optional **Ollama-backed text generation** (**`Generate`** with optional **`stats_context_json`**), **public JSON fetch** (**`FetchPublicStats`**), **operator stats chat** (**`OperatorStatsChat`**), and structured **`ReviewContent`** responses for the user-content moderation pipeline used by **many_faces_backend** (`many_faces_backend/`).
+This is a **thin, stateless gRPC adapter** in front of a **local Ollama** instance — it **never reads the database and never talks to Elasticsearch**. The **backend orchestrates** everything (retrieval, ACL, trust); this worker only **generates** and **embeds**.
+
+Its main job today is to power the backend's **RAG operator chat**: `EmbedText` turns the operator's question (and the stat-bundle descriptors) into vectors so the backend can retrieve the relevant data from Elasticsearch, and `Generate` answers **one focused bundle at a time** (the batched map+stitch that keeps a small local 7B accurate). It also serves **`ReviewContent`** — advisory recommendations for the user-content moderation pipeline. **Strengths:** fully local (no cloud LLM), advisory-only (the backend + SUPER_ADMIN decide), and exact figures stay deterministic (the model narrates, it never invents numbers).
 
 ## Documentation in this repo
 
@@ -54,7 +58,7 @@ Python **gRPC adapter** providing **health checks**, optional **Ollama-backed te
 | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
 | [`README.md`](./README.md)                                                           | This file — overview, roadmap, runbook.                                      |
 | [`docs/SECURITY.md`](./docs/SECURITY.md)                                             | **AIH1** security guide — auth, TLS, SSRF, moderation, production checklist. |
-| [`docs/operator-live-stats-map-reduce.md`](./docs/operator-live-stats-map-reduce.md) | Live stats map-reduce for operator chat.                                     |
+| [`docs/operator-live-stats-map-reduce.md`](./docs/operator-live-stats-map-reduce.md) | Legacy map-reduce (now the degraded fallback; RAG is the live path).         |
 | [`docs/host-profile.md`](./docs/host-profile.md)                                     | Host profile RPC and admin settings panel wiring.                            |
 
 ### Security at a glance
@@ -71,9 +75,9 @@ Monorepo guides: [`docs/readmes/ai-grpc-overview.md`](../docs/readmes/ai-grpc-ov
 
 ## Overview
 
-The Many Faces AI service (**many_faces_ai**; monorepo path `many_faces_ai/`) is a Python-based **gRPC adapter**. The backend API (**many_faces_backend** / `many_faces_backend/`) connects on startup for **health verification**, optional **Ollama-backed `Generate`** (with optional **`stats_context_json`** for operator admin chat), **`FetchPublicStats`** / **`OperatorStatsChat`** when **live** public-statistics mode is enabled, and the **`ReviewContent`** contract used by the user-content moderation worker. Inference runs on a **host Ollama** instance (default **`qwen2.5:7b-instruct-q4_K_M`**), not inside this container.
+The Many Faces AI service (**many_faces_ai**; monorepo path `many_faces_ai/`) is a Python-based **gRPC adapter**. The backend API (**many_faces_backend** / `many_faces_backend/`) connects on startup for **health verification** and then uses two live paths: the **RAG operator chat** — **`EmbedText`** (embed the question + the stat-bundle descriptors) and **`Generate`** (answer one retrieved bundle at a time, then the backend stitches) — and **`ReviewContent`** for the user-content moderation pipeline. Inference runs on a **host Ollama** instance (generation **`qwen2.5:7b-instruct-q4_K_M`**, embeddings **`nomic-embed-text`**), not inside this container. _(The older `stats_context_json` prefix, `FetchPublicStats`, and `OperatorStatsChat` RPCs still exist on the worker but are **legacy** — the backend's chat no longer uses them; retrieval replaced them.)_
 
-In the broader Many Faces AI architecture, this submodule is the AI workspace for application-aware intelligence. **Implemented today:** gRPC **`Health`**, **`Generate`** (Ollama chat + optional aggregate JSON prefix), **`FetchPublicStats`** (HTTP GET helper), **`OperatorStatsChat`** (optional live fetch + **`Generate`**), and **`ReviewContent`** — a deterministic classifier over text and media URL metadata that returns approve / reject / needs-human-review with confidence, risk, flags, reasons, and optional **`image_analysis_boundary`** / **`video_analysis_boundary`** policy flags (placeholders for heavier CV models; this reference classifier does not treat them as sole auto-reject triggers). The longer-term direction is richer context snapshots, admin reports, and chat-security RPCs.
+In the broader Many Faces AI architecture, this submodule is the AI workspace for application-aware intelligence. **Live today:** gRPC **`Health`**, **`EmbedText`** (embeddings that power the backend's RAG retrieval **and** skill routing), **`Generate`** (Ollama chat used as the batched map+stitch over retrieved bundles, and for the moderation/general skills), **`GenerateReport`** (deterministic admin reports for the reports skill), and **`ReviewContent`** — a deterministic classifier over text and media URL metadata that returns approve / reject / needs-human-review with confidence, risk, flags, reasons, and optional **`image_analysis_boundary`** / **`video_analysis_boundary`** policy flags (placeholders for heavier CV models; this reference classifier does not treat them as sole auto-reject triggers). **Also hosted but not backend-wired:** `GenerateStream`, `ChatRiskScore`, `BuildFaceContextSnapshot`, `ExplainDecision` (legacy: `OperatorStatsChat`, `FetchPublicStats`). The backend's capabilities are exposed as routed **skills** (stats, reports, moderation Q&A, general-assistant) — see [`../docs/guides/operator-ai-skills.md`](../docs/guides/operator-ai-skills.md).
 
 The goal is for the AI service to understand the application's structure instead of acting as a generic text generator. Future capabilities can use face configuration, page layouts, grid components, roles, content modules, and backend metadata as context for more useful responses. That makes the service a natural place for application-context summaries, admin-facing insights, feature recommendations, and guided diagnostics across the MFAI platform.
 
@@ -124,9 +128,11 @@ Safety rule:
 
 This keeps the AI service useful without making it an uncontrolled publisher.
 
-## Operator statistics RPCs (admin assistant)
+## Operator statistics RPCs (admin assistant) — legacy
 
-The **many_faces_backend** `ChatHub` may call these RPCs when a platform operator uses **admin AI chat** with **inline** or **live** public-statistics mode (see monorepo [`docs/guides/admin-dashboard-metrics.md`](../docs/guides/admin-dashboard-metrics.md)):
+> **Legacy.** The operator chat now uses **RAG** (`EmbedText` + `Generate` — see the top of this README and [`../docs/guides/operator-ai-rag-retrieval.md`](../docs/guides/operator-ai-rag-retrieval.md)). The `inline`/`live` stats modes, `stats_context_json`, `FetchPublicStats`, and `OperatorStatsChat` below are **no longer used by the backend chat**; they remain on the worker for compatibility. Kept here for reference.
+
+The **many_faces_backend** `ChatHub` historically called these RPCs when a platform operator used **admin AI chat** with **inline** or **live** public-statistics mode:
 
 | RPC                     | Role                                                                                                                                                                                                                              |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
