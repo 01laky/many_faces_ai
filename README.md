@@ -1,4 +1,4 @@
-# Many Faces AI service - gRPC Server
+# Many Faces AI Service
 
 <!-- readme-badges:start -->
 
@@ -12,37 +12,43 @@
 
 <!-- readme-badges:end -->
 
-**Version:** [`0.10.0`](./VERSION) · [Changelog](./CHANGELOG.md) · [Capability roadmap v0.9.0](./docs/capability-roadmap-v0.9.0.md)
+**Version:** [`0.10.0`](./VERSION) · [Changelog](./CHANGELOG.md) · [Capability roadmap](./docs/capability-roadmap-v0.9.0.md)
 
 **Author:** Ladislav Kostolny · [01laky@gmail.com](mailto:01laky@gmail.com)
 
-**Local AI adapter for the Many Faces platform.** This Python service exposes the gRPC surface that the backend uses for operator chat generation, live statistics prompts, AI-assisted content review, and AI worker host profiling. The model itself runs in **Ollama on the host**; the container stays lightweight. **No public HTTP** — only `many_faces_backend` should call this service.
+> **Local AI adapter for Many Faces AI.** Exposes the gRPC surface `many_faces_backend` uses for operator chat generation, RAG embeddings, content moderation review, and AI worker health profiling. Inference runs in **Ollama on the host** — the container stays lightweight. **No public HTTP** — only `many_faces_backend` should call this service.
 
-### Three pillars
+---
 
-| Pillar              | Highlights                                                                                                                                                                                                                                                                                                                                                                                     |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Security (AIH1)** | Internal **gRPC only**; optional **`x-ai-worker-token`** metadata; **TLS** via `GRPC_TLS_CERT_FILE`; SSRF guards on public stats fetch; moderation output sanitization. CI: `node ../scripts/verify-ai-security-tests.mjs`. [`docs/SECURITY.md`](./docs/SECURITY.md).                                                                                                                          |
-| **AI capabilities** | **In use:** **`EmbedText`** (vectors that power the backend's RAG retrieval) + **`Generate`** (batched map+stitch operator chat) + **`GenerateStream`** (token streaming of the operator-visible answer); **`ReviewContent`** (advisory content moderation, rules + optional LLM); **`GetHostProfile`** / **`HealthCheck`** (infra). **Available, not yet wired:** `ChatRiskScore`, `GenerateReport`, `BuildFaceContextSnapshot`, `ExplainDecision`. |
-| **Configuration**   | **`OLLAMA_HOST`**, generation + embedding model names, timeout, max tokens via env; **low-VRAM tuning** (`OLLAMA_KEEP_ALIVE=-1`, `OLLAMA_NUM_GPU`, `OLLAMA_FLASH_ATTENTION`, `OLLAMA_KV_CACHE_TYPE`); host profile exposed to admin; compose profile **`ai-dev`** in monorepo stack. RAG: [`../docs/guides/operator-ai-rag-retrieval.md`](../docs/guides/operator-ai-rag-retrieval.md) · perf: [`../docs/guides/operator-ai-performance.md`](../docs/guides/operator-ai-performance.md). |
+## Quick Start
 
-| Start here     | Link                                                                                         |
-| -------------- | -------------------------------------------------------------------------------------------- |
-| **Security**   | [`docs/SECURITY.md`](./docs/SECURITY.md) — trust boundaries, auth, TLS, SSRF                 |
-| Run standalone | `./scripts/start-dev.sh`                                                                     |
-| Full stack     | `../scripts/start-all-dev.sh` from `many_faces_main`                                         |
-| gRPC port      | `localhost:50051`                                                                            |
-| RAG guide      | [`../docs/guides/operator-ai-rag-retrieval.md`](../docs/guides/operator-ai-rag-retrieval.md) |
+```bash
+# Full stack (recommended)
+cd many_faces_main
+./scripts/start-all-dev.sh
+
+# Standalone
+cd many_faces_ai
+./scripts/start-dev.sh
+```
+
+**gRPC port:** `localhost:50051` · **Ollama** must be running on the host at `OLLAMA_HOST`
+
+---
+
+## Architecture
 
 ```mermaid
 flowchart LR
     be["many_faces_backend<br/>IAiGrpcService (orchestrator)"] --> grpc["many_faces_ai<br/>thin Python gRPC adapter"]
-    grpc --> ollama["Ollama host"]
-    be -->|"RAG: embed the question"| embed["EmbedText → nomic-embed-text"]
+    grpc --> ollama["Ollama on host<br/>qwen2.5:7b · nomic-embed-text"]
+
+    be -->|"RAG: embed question"| embed["EmbedText → nomic-embed-text"]
     be -->|"RAG: answer one bundle"| gen["Generate → qwen2.5:7b"]
-    be -->|"stream the operator answer"| stream["GenerateStream → qwen2.5:7b"]
+    be -->|"stream operator answer"| stream["GenerateStream → qwen2.5:7b"]
     be -->|"content moderation"| review["ReviewContent"]
     be -->|"infra"| profile["GetHostProfile / HealthCheck"]
+
     embed --> grpc
     gen --> grpc
     stream --> grpc
@@ -50,476 +56,248 @@ flowchart LR
     profile --> grpc
 ```
 
-This is a **thin, stateless gRPC adapter** in front of a **local Ollama** instance — it **never reads the database and never talks to Elasticsearch**. The **backend orchestrates** everything (retrieval, ACL, trust); this worker only **generates** and **embeds**.
+**This service is stateless.** It never reads the database, never calls Elasticsearch, and never publishes content. The **backend orchestrates** everything — this worker only **generates** and **embeds**.
 
-Its main job today is to power the backend's **RAG operator chat**: `EmbedText` turns the operator's question (and the stat-bundle descriptors) into vectors so the backend can retrieve the relevant data from Elasticsearch, and `Generate` answers **one focused bundle at a time** (the batched map+stitch that keeps a small local 7B accurate). `GenerateStream` streams the operator-visible answer token-by-token so it appears as it is produced. It also serves **`ReviewContent`** — advisory recommendations for the user-content moderation pipeline. **Strengths:** fully local (no cloud LLM), advisory-only (the backend + SUPER_ADMIN decide), and exact figures stay deterministic (the model narrates, it never invents numbers).
+---
 
-**Performance on a local 7B.** The backend keeps the model **resident** (the worker also passes `keep_alive: -1` on `/api/chat` + `/api/embeddings`), short-circuits the common cases with **count / single-bundle fast-paths** (0 / 1 generation, no synthesis), and **streams** the terminal answer via `GenerateStream`. On a 4 GB RTX 3050 the 7B-q4 (~4.7 GB) is **partial-GPU + CPU spillover**, tuned with `OLLAMA_NUM_GPU` / `OLLAMA_FLASH_ATTENTION` / `OLLAMA_KV_CACHE_TYPE` / `OLLAMA_NUM_CTX`; an optional **CPU-resident 3B helper** (`num_gpu=0`, `OLLAMA_MAX_LOADED_MODELS=2`) can advise on gating without GPU contention. Full guide: [`../docs/guides/operator-ai-performance.md`](../docs/guides/operator-ai-performance.md).
+## Three Pillars
 
-## Documentation in this repo
+| Pillar              | Highlights                                                                                                                                                                                                                                                                                             |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Security (AIH1)** | Internal **gRPC only** — no public HTTP; optional **`x-ai-worker-token`** metadata auth; **TLS** via `GRPC_TLS_CERT_FILE`; SSRF guards on public stats fetch; moderation input sanitization. CI: `node ../scripts/verify-ai-security-tests.mjs`.                                                       |
+| **AI capabilities** | **Live:** `EmbedText` (RAG vectors) · `Generate` (batched map+stitch) · `GenerateStream` (token streaming) · `ReviewContent` (advisory moderation) · `GetHostProfile` / `HealthCheck`. **Available, not yet wired:** `ChatRiskScore`, `GenerateReport`, `BuildFaceContextSnapshot`, `ExplainDecision`. |
+| **Configuration**   | `OLLAMA_HOST`, model names, timeout, max tokens via env; **low-VRAM tuning** (`OLLAMA_KEEP_ALIVE=-1`, `OLLAMA_NUM_GPU`, `OLLAMA_FLASH_ATTENTION`, `OLLAMA_KV_CACHE_TYPE`).                                                                                                                             |
 
-| Doc                                                                                  | Purpose                                                                      |
-| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| [`README.md`](./README.md)                                                           | This file — overview, roadmap, runbook.                                      |
-| [`docs/SECURITY.md`](./docs/SECURITY.md)                                             | **AIH1** security guide — auth, TLS, SSRF, moderation, production checklist. |
-| [`docs/operator-live-stats-map-reduce.md`](./docs/operator-live-stats-map-reduce.md) | Legacy map-reduce (now the degraded fallback; RAG is the live path).         |
-| [`docs/host-profile.md`](./docs/host-profile.md)                                     | Host profile RPC and admin settings panel wiring.                            |
+---
 
-### Security at a glance
+## Why This AI Design
+
+| Strength                              | What it means                                                                                                                                                                |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Fully local**                       | Ollama on the host — privacy, no per-token cost, works offline                                                                                                               |
+| **RAG, not prompt-stuffing**          | Operator chat **embeds the question** and retrieves only relevant data (ES kNN+BM25, RRF) — no full data dump into context                                                   |
+| **Exact numbers, never hallucinated** | Embeddings only **route** to the right data; **figures are loaded fresh and deterministically** by the backend — the model narrates, never invents counts                    |
+| **Tuned for small local models**      | **Batched map+stitch** feeds the 7B one focused chunk at a time; **fast-paths** answer count/single-bundle questions with 0–1 generations; answer **streams** token-by-token |
+| **Advisory-only**                     | The worker only recommends; `SUPER_ADMIN` finalizes moderation; AI never publishes; two trust models (untrusted user content vs trusted operator) never mixed                |
+| **SUPER_ADMIN-only**                  | All AI features live in the admin surface; no user-facing AI                                                                                                                 |
+
+---
+
+## AI Paths — Two Separate Pipelines
+
+| Path                        | RPCs                                        | Purpose                                                                                                                         |
+| --------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| **Operator RAG chat**       | `EmbedText` + `Generate` + `GenerateStream` | Threaded operator chat: embed question → retrieve stat bundles from ES → load fresh values → batched map+stitch → stream answer |
+| **User content moderation** | `ReviewContent`                             | Albums/blogs/reels approval queue — advisory; untrusted content, **never** mixed with the operator path                         |
+
+---
+
+## Performance on a Local 7B
+
+On a dedicated **RTX 3050 4 GB + Ryzen 7** box: ~90–120 s for a full answer. Three optimizations:
+
+| Optimization                | How                                                                                                     |
+| --------------------------- | ------------------------------------------------------------------------------------------------------- |
+| **Fewer generations**       | Count fast-path = **0** generations; single-bundle fast-path = **1**                                    |
+| **Faster generations**      | `OLLAMA_KEEP_ALIVE=-1` keeps model resident; 96-token map cap; `MaxParallelBundleAiCalls=1` on 4 GB GPU |
+| **Lower perceived latency** | `GenerateStream` → token-by-token in admin UI as it generates                                           |
+
+**GPU tuning (4 GB VRAM):** `OLLAMA_NUM_GPU=20` (partial offload), `OLLAMA_FLASH_ATTENTION=1`, `OLLAMA_KV_CACHE_TYPE=q8_0`, `OLLAMA_NUM_CTX=4096`.
+
+**Optional 3B helper:** `num_gpu=0` + `OLLAMA_MAX_LOADED_MODELS=2` — CPU-resident for gating decisions, no GPU contention.
+
+**Full guide:** [`../docs/guides/operator-ai-performance.md`](../docs/guides/operator-ai-performance.md)
+
+---
+
+## Content Moderation Role
+
+The `ReviewContent` RPC is an **advisory** classifier for user-created albums, blogs, and reels. This service:
+
+- Receives bounded review requests from the backend worker (content type, titles, descriptions, media URLs, moderation version)
+- Normalizes untrusted input via `moderation_input_sanitize.py` before classification (control + bidi stripping, length caps)
+- Returns structured decision: `approve` / `reject` / `needs_human_review` with confidence, risk level, flags, safe user-facing message, model version, trace id
+- **Never** writes to PostgreSQL, never publishes content, never auto-approves
+
+**Safety rule:** AI recommends → backend policy validates → `SUPER_ADMIN` finalizes.
+
+**Guide:** [`../docs/guides/ai-assisted-content-approval.md`](../docs/guides/ai-assisted-content-approval.md)
+
+---
+
+## Security (AIH1)
 
 - Internal **gRPC only** — no public HTTP API; backend is the sole intended caller.
 - Optional **`x-ai-worker-token`** metadata auth; hardened profile requires it at startup.
 - Optional **gRPC TLS** via `GRPC_TLS_CERT_FILE` / `GRPC_TLS_KEY_FILE`.
-- **`ReviewContent`** runs PI-4 sanitization on untrusted creator fields before classification.
-- **`FetchPublicStats`** applies worker-side SSRF policy (HTTPS public, loopback HTTP in dev).
-- Prompt / token caps and optional in-process rate limit on hot RPCs.
+- `ReviewContent` runs PI-4 sanitization on untrusted creator fields before classification.
+- `FetchPublicStats` applies worker-side SSRF policy (HTTPS for public, loopback HTTP in dev only).
+- Prompt and token caps; optional in-process rate limit on hot RPCs.
 - Security regression tests: `tests/**/*_security.py` — run `node ../scripts/verify-ai-security-tests.mjs` from monorepo root.
 
-Monorepo guides: [`docs/readmes/ai-grpc-overview.md`](../docs/readmes/ai-grpc-overview.md), [`docs/guides/admin-dashboard-metrics.md`](../docs/guides/admin-dashboard-metrics.md).
+Full guide: [`docs/SECURITY.md`](./docs/SECURITY.md)
 
-## Overview
+---
 
-The Many Faces AI service (**many_faces_ai**; monorepo path `many_faces_ai/`) is a Python-based **gRPC adapter**. The backend API (**many_faces_backend** / `many_faces_backend/`) connects on startup for **health verification** and then uses two live paths: the **RAG operator chat** — **`EmbedText`** (embed the question + the stat-bundle descriptors) and **`Generate`** (answer one retrieved bundle at a time, then the backend stitches) — and **`ReviewContent`** for the user-content moderation pipeline. Inference runs on a **host Ollama** instance (generation **`qwen2.5:7b-instruct-q4_K_M`**, embeddings **`nomic-embed-text`**), not inside this container. _(The older `stats_context_json` prefix, `FetchPublicStats`, and `OperatorStatsChat` RPCs still exist on the worker but are **legacy** — the backend's chat no longer uses them; retrieval replaced them.)_
+## Tech Stack
 
-In the broader Many Faces AI architecture, this submodule is the AI workspace for application-aware intelligence. **Live today:** gRPC **`Health`**, **`EmbedText`** (embeddings that power the backend's RAG retrieval **and** skill routing), **`Generate`** (Ollama chat used as the batched map+stitch over retrieved bundles, and for the moderation/general skills), **`GenerateReport`** (deterministic admin reports for the reports skill), and **`ReviewContent`** — a deterministic classifier over text and media URL metadata that returns approve / reject / needs-human-review with confidence, risk, flags, reasons, and optional **`image_analysis_boundary`** / **`video_analysis_boundary`** policy flags (placeholders for heavier CV models; this reference classifier does not treat them as sole auto-reject triggers). **`GenerateStream`** is now backend-wired for token streaming of the operator-visible answer. **Also hosted but not backend-wired:** `ChatRiskScore`, `BuildFaceContextSnapshot`, `ExplainDecision` (legacy: `OperatorStatsChat`, `FetchPublicStats`). The backend's capabilities are exposed as routed **skills** (stats, reports, moderation Q&A, general-assistant) — see [`../docs/guides/operator-ai-skills.md`](../docs/guides/operator-ai-skills.md).
+| Layer            | Technology                             |
+| ---------------- | -------------------------------------- |
+| Language         | Python 3.11                            |
+| RPC framework    | gRPC (`grpcio` 1.80)                   |
+| Serialization    | Protocol Buffers (`grpcio-tools`)      |
+| Inference        | Ollama HTTP API (local host)           |
+| Generation model | `qwen2.5:7b-instruct-q4_K_M` (default) |
+| Embedding model  | `nomic-embed-text`                     |
+| Tests            | pytest                                 |
+| Proto contracts  | Nested `many_faces_proto` submodule    |
 
-The goal is for the AI service to understand the application's structure instead of acting as a generic text generator. Future capabilities can use face configuration, page layouts, grid components, roles, content modules, and backend metadata as context for more useful responses. That makes the service a natural place for application-context summaries, admin-facing insights, feature recommendations, and guided diagnostics across the MFAI platform.
-
-This README describes both the current service and the intended direction. The application-context, reporting, feature-management, and chat-security capabilities described below are roadmap items unless explicitly implemented in code.
-
-## Role In MFAI
-
-- **Application context intelligence:** build structured summaries of faces, pages, modules, routes, roles, and configuration so AI features can reason about the real app state.
-- **Operational reports:** generate human-readable reports for admins, such as face health, missing configuration, inactive modules, content gaps, usage patterns, or security-relevant anomalies.
-- **Feature management support:** help evaluate which features are enabled, incomplete, duplicated, risky, or ready to expose for a specific face or user role.
-- **Chat security assistance:** support moderation, abuse detection, unsafe-content review, suspicious-message reporting, and policy-aware chat diagnostics.
-- **Admin decision support:** provide explanations and recommendations that help operators understand what is configured, what is missing, and what should be reviewed next.
-- **Developer diagnostics:** eventually assist with debugging cross-service behaviour by summarizing backend responses, frontend grid schemas, AI service state, and integration errors.
-- **Safety-first AI boundaries:** keep AI outputs advisory by default, with backend-controlled enforcement for permissions, moderation decisions, and sensitive operations.
-
-## Suggested Future Capabilities
-
-The following areas would make the AI submodule more useful as the platform grows:
-
-- **Context snapshots:** a backend-provided payload describing faces, routes, page schemas, available modules, roles, capabilities, and recent operational signals.
-- **Report generation RPCs:** typed gRPC methods for generating admin reports instead of overloading free-form text generation.
-- **Feature review workflows:** AI-assisted checks for whether a face has complete pages, useful grid composition, required modules, and safe defaults.
-- **Chat risk scoring:** structured review of chat messages or conversations for spam, harassment, suspicious links, prompt-injection attempts, or policy violations.
-- **Content approval recommendations:** implemented via `ReviewContent` (see below); backend owns enqueue, validation, and final status.
-- **Explainable recommendations:** responses that include the reason, confidence, and source context behind each recommendation.
-- **Audit-friendly logging:** request metadata and model decisions logged in a way that supports review without leaking sensitive user content unnecessarily.
-- **Human approval flow:** AI can suggest moderation or configuration changes, but admin/backend workflows should approve any action that affects users or access rules.
-
-## AI-Assisted Content Approval Role
-
-The content approval workflow uses this service as an **advisory** reviewer for regular FE user-created albums, blogs, and reels. The service **never** publishes or deletes rows in PostgreSQL: it only answers `ReviewContent`. **many_faces_backend** (`many_faces_backend/`) enqueues Redis jobs, calls gRPC, validates ranges and policy, retries with backoff, and only `SUPER_ADMIN` (or future explicit auto-policy) may set final `ApprovalStatus`. Full process guide: [`docs/guides/ai-assisted-content-approval.md`](../docs/guides/ai-assisted-content-approval.md). Agent prompt for untrusted-content defenses (sanitization, heuristics, tests): [`docs/prompts/moderation-content-prompt-injection-defense-agent-prompt.md`](../docs/prompts/moderation-content-prompt-injection-defense-agent-prompt.md).
-
-Target responsibilities:
-
-- Receive bounded review requests from the backend worker (content type, titles, descriptions, media URLs, moderation version).
-- Classify using deterministic rules plus URL heuristics; attach **boundary** flags when image/video analysis would require a heavier model later.
-- **`ReviewContent` input path:** untrusted title, body, and media URL are normalized in-process via `moderation_input_sanitize.py` (control and bidi stripping, length caps) before keyword classification — mirroring the backend sanitizer for defense in depth.
-- Return a structured decision: `approve`, `reject`, or `needs_human_review`.
-- Include confidence, risk level, flags, internal reason, safe user-facing message, model version, and trace id.
-- Avoid autonomous side effects; all durable state changes stay in the API.
-- Support auditability with stable trace metadata; tests in `test_server.py`, `tests/test_*_security.py` (AIH1), and shared sanitize corpus.
-
-Safety rule:
-
-- AI recommends.
-- Backend validates the recommendation.
-- Admin/superadmin or explicit backend policy finalizes the moderation decision.
-
-This keeps the AI service useful without making it an uncontrolled publisher.
-
-## Operator statistics RPCs (admin assistant) — legacy
-
-> **Legacy.** The operator chat now uses **RAG** (`EmbedText` + `Generate` — see the top of this README and [`../docs/guides/operator-ai-rag-retrieval.md`](../docs/guides/operator-ai-rag-retrieval.md)). The `inline`/`live` stats modes, `stats_context_json`, `FetchPublicStats`, and `OperatorStatsChat` below are **no longer used by the backend chat**; they remain on the worker for compatibility. Kept here for reference.
-
-The **many_faces_backend** `ChatHub` historically called these RPCs when a platform operator used **admin AI chat** with **inline** or **live** public-statistics mode:
-
-| RPC                     | Role                                                                                                                                                                                                                              |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`Generate`**          | Same as chat completion; if **`stats_context_json`** is set, the servicer prepends a short English banner + JSON + separator **before** the conversational prompt.                                                                |
-| **`FetchPublicStats`**  | **`GET`** the **`absolute_url`** (must be `http://` or `https://`). For **localhost / 127.0.0.1 / ::1** over HTTPS, TLS verification is relaxed for dev self-signed certs only.                                                   |
-| **`OperatorStatsChat`** | If **`fetch_live_public_snapshot`**, calls **`FetchPublicStats`** first; builds **`GenerateRequest`** with optional **`stats_context_json`** and a final **`User:` / `AI:`** tail from **`user_message`** and **`history_text`**. |
-
-**Proto:** canonical **`health.proto`** lives in the nested **`many_faces_proto`** submodule at **`many_faces_ai/many_faces_proto/proto/health.proto`**. Regenerate with **`scripts/generate_proto.sh`**; generated `*_pb2.py` files are gitignored — use a **`.venv`** with **`grpcio-tools`** when `python3 -m grpc_tools.protoc` is not available on the host.
-
-**Tests:** `test_server.py` + **`tests/**/\*\_security.py`** (AIH1) cover **`Generate`**, **`FetchPublicStats`**, **`ReviewContent`\*\*, auth/TLS env, and SSRF policy.
-
-## Features
-
-- **gRPC Server**
-  - High-performance RPC communication
-  - Protocol Buffers for data serialization
-  - Health check endpoint
-  - **AI text generation** — **`Generate`** RPC via Ollama `/api/chat`; optional **`stats_context_json`** prepends read-only aggregate JSON (admin operator chat **inline** / metrics-like questions).
-  - **Public stats fetch** — **`FetchPublicStats`** RPC: server-side HTTP GET of a caller-supplied absolute URL (used by **`OperatorStatsChat`** **live** mode; intended for **`/public/api/Stats/public`** on the API host).
-  - **Operator stats chat** — **`OperatorStatsChat`** RPC: optionally fetch JSON, then **`Generate`** with composed **`User:` / `AI:`** prompt tail.
-  - **Content review** — **`ReviewContent`** RPC for structured moderation recommendations
-
-- **Docker Support**
-  - Containerized development environment
-  - Automatic proto file generation during build
-  - Network integration with other services
-
-- **Health Check RPC**
-  - Returns service status and availability
-  - Used by backend API for startup health verification
-
-## Technologies
-
-- **Python 3.11** - Programming language
-- **gRPC** - High-performance RPC framework
-- **Protocol Buffers** - Data serialization
-- **grpcio** - Python gRPC library
-- **grpcio-tools** - Protocol buffer compiler
+---
 
 ## Project Structure
 
 ```
 many_faces_ai/
-├── proto/                  # Generated Python stubs (from many_faces_proto)
-│   ├── health_pb2.py       # Generated message classes
-│   └── health_pb2_grpc.py  # Generated gRPC service stubs
-├── scripts/                # Shell helpers (proto generation, Docker dev, lint, verify-ci)
-├── server.py               # gRPC server implementation
-├── moderation_input_sanitize.py  # Untrusted-field normalization before ReviewContent
-├── test_server.py          # gRPC servicer tests (pytest)
-├── test_moderation_input_sanitize.py  # Unit tests for sanitizer
-├── services/               # AI model service
-│   ├── __init__.py
-│   └── ai_model_service.py # Ollama HTTP adapter (generate)
-├── requirements.txt        # Python dependencies
-├── Dockerfile.dev          # Development Dockerfile
-└── README.md               # This file
+├── proto/                            # Generated Python stubs (from many_faces_proto)
+├── scripts/                          # proto generation, Docker dev, lint, verify-ci
+├── server.py                         # gRPC server — all RPC servicers
+├── moderation_input_sanitize.py      # Untrusted-field normalization for ReviewContent
+├── test_server.py                    # gRPC servicer tests (pytest)
+├── test_moderation_input_sanitize.py # Sanitizer unit tests
+├── services/
+│   └── ai_model_service.py           # Ollama HTTP adapter (generate + embed)
+├── tests/                            # Security regression tests (AIH1)
+├── requirements.txt                  # Python dependencies
+├── Dockerfile.dev                    # Dev image
+└── docs/
+    ├── SECURITY.md                   # AIH1 security guide
+    ├── host-profile.md               # GetHostProfile RPC + admin panel wiring
+    ├── operator-live-stats-map-reduce.md  # Legacy — replaced by RAG
+    └── capability-roadmap-v0.9.0.md  # Roadmap
 ```
 
-## Running
+---
 
-Local and Docker flows are covered below under **Model Selection** and **Running in Docker Container**.
+## Getting Started
 
-## Model Selection
-
-The default local LLM is served by Ollama:
-
-- `qwen2.5:7b-instruct-q4_K_M`
-
-`many_faces_ai` no longer loads Hugging Face / PyTorch weights directly. It remains the gRPC adapter on port `50051` and calls Ollama's local HTTP API for generation.
-
-You can override the model without changing code:
-
-```bash
-export OLLAMA_MODEL="qwen2.5:7b-instruct-q4_K_M"
-```
-
-For a Windows machine with RTX 3050 4GB VRAM, about 10GB usable RAM, and 8 CPU threads, start with:
-
-```bash
-export OLLAMA_BASE_URL="http://host.docker.internal:11434"
-export OLLAMA_MODEL="qwen2.5:7b-instruct-q4_K_M"
-export OLLAMA_NUM_CTX=4096
-export OLLAMA_NUM_THREAD=8
-export OLLAMA_NUM_GPU=20
-export OLLAMA_NUM_BATCH=128
-```
-
-### Running in Docker Container (Recommended)
-
-The easiest way to run the Many Faces AI server in development:
+### Running in Docker (Recommended)
 
 ```bash
 ./scripts/start-dev.sh
 ```
 
-This script will:
-
-1. Check if proto files exist (if not, they will be generated during Docker build)
-2. Build Docker image (if needed)
-3. Start the gRPC server container
-4. Make the server available at `localhost:50051`
-
-### Using Root Docker Compose
+Starts the gRPC server container at `localhost:50051`. Ollama must run on the host.
 
 ```bash
-# From root directory
-docker-compose -f docker-compose.dev.yml up -d ai-demo-dev
+./scripts/stop-dev.sh     # stop
+./scripts/clear-dev.sh    # stop + remove containers and images
+./scripts/rebuild-dev.sh  # rebuild without starting
 ```
 
-### Stopping Services
+### Without Docker
 
 ```bash
-./scripts/stop-dev.sh
+pip install -r requirements.txt
+./scripts/generate_proto.sh   # generate proto stubs
+python3 server.py
 ```
 
-Or manually:
+### Model Selection
 
 ```bash
-docker-compose -f docker-compose.dev.yml stop ai-demo-dev
-docker-compose -f docker-compose.dev.yml rm -f ai-demo-dev
+# Default
+export OLLAMA_MODEL="qwen2.5:7b-instruct-q4_K_M"
+export OLLAMA_BASE_URL="http://host.docker.internal:11434"
+
+# Low-VRAM tuning (4 GB GPU, partial offload)
+export OLLAMA_NUM_CTX=4096
+export OLLAMA_NUM_THREAD=8
+export OLLAMA_NUM_GPU=20
+export OLLAMA_NUM_BATCH=128
+export OLLAMA_KEEP_ALIVE=-1
+export OLLAMA_FLASH_ATTENTION=1
+export OLLAMA_KV_CACHE_TYPE=q8_0
 ```
 
-### Clearing Everything
+Model weights live in **Ollama's model store**, not inside this container — recreating the container does not delete the model.
 
-```bash
-./scripts/clear-dev.sh
-```
-
-This removes containers and images.
-
-### Rebuilding Docker Images
-
-To perform a clean rebuild of Docker images:
-
-```bash
-./scripts/rebuild-dev.sh
-```
-
-**Note**: This only builds images, it does NOT start containers. Use `./scripts/start-dev.sh` to start containers after rebuilding.
-
-### Local Development (Without Docker)
-
-1. **Install dependencies**:
-
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-2. **Generate gRPC code from proto files**:
-
-   ```bash
-   ./scripts/generate_proto.sh
-   ```
-
-   This generates:
-   - `proto/health_pb2.py` - Protocol buffer message classes
-   - `proto/health_pb2_grpc.py` - gRPC service stubs
-
-3. **Run the server**:
-
-   ```bash
-   python server.py
-   ```
-
-   The server will listen on port 50051 by default (configurable via `PORT` environment variable).
-
-### Local unit tests (pytest)
-
-From `many_faces_ai/`:
-
-```bash
-python3 -m venv .venv
-.venv/bin/pip install grpcio grpcio-tools protobuf pytest grpcio-testing
-.venv/bin/pytest test_server.py -v
-```
-
-Pinned versions in `requirements.txt` target **Python 3.11**. On **Python 3.13+**, installing those exact pins may try to build grpcio from source; use the unconstrained `grpcio` / `grpcio-tools` / `grpcio-testing` lines above (or matching wheels) so `pytest` can run. Generated stubs under `proto/` (`health_pb2.py`, `health_pb2_grpc.py`) must exist—run `./scripts/generate_proto.sh` or build via Docker. gRPC tests use the `grpc` marker (see `pytest.ini`).
-
-## gRPC Service
-
-### Health Check
-
-The service provides a `HealthCheck` RPC method:
-
-- **Method**: `HealthCheck`
-- **Request**: `HealthCheckRequest` (empty message)
-- **Response**: `HealthCheckResponse` with:
-  - `status` - Service status (e.g., "success")
-  - `message` - JSON model status (`ready`, `loading`, `unavailable`, `modelName`, `error`)
-
-### Generate (AI text generation)
-
-- **Method**: `Generate`
-- **Request**: `GenerateRequest` with `prompt` (string), optional `max_new_tokens` (int32)
-- **Response**: `GenerateResponse` with `text` (generated text), optional `error` (if failed)
-- Calls local **Ollama** (`/api/chat`); no external cloud API key.
-
-- **Port**: 50051 (default, configurable via `PORT` environment variable)
-
-### Protocol Buffer Definition
-
-```protobuf
-syntax = "proto3";
-
-service HealthService {
-  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
-}
-
-message HealthCheckRequest {}
-
-message HealthCheckResponse {
-  string status = 1;
-  string message = 2;
-}
-```
+---
 
 ## Configuration
 
-### Environment Variables
+| Variable                   | Purpose                                     |
+| -------------------------- | ------------------------------------------- |
+| `OLLAMA_HOST`              | Ollama HTTP base URL                        |
+| `OLLAMA_MODEL`             | Generation model name                       |
+| `OLLAMA_NUM_CTX`           | Context window tokens                       |
+| `OLLAMA_NUM_GPU`           | GPU layers to offload                       |
+| `OLLAMA_KEEP_ALIVE`        | Set `-1` to keep model resident             |
+| `OLLAMA_FLASH_ATTENTION`   | Enable flash attention (low-VRAM)           |
+| `OLLAMA_KV_CACHE_TYPE`     | KV cache precision (`q8_0` for 4 GB)        |
+| `GRPC_PORT`                | gRPC listen port (default `50051`)          |
+| `GRPC_TLS_CERT_FILE`       | TLS certificate path (enables TLS)          |
+| `GRPC_TLS_KEY_FILE`        | TLS private key path                        |
+| `AI_WORKER_EXPECTED_TOKEN` | Required `x-ai-worker-token` metadata value |
 
-- `PORT` — gRPC server port (default: `50051`)
-- **Security (AIH1):** see [`docs/SECURITY.md`](./docs/SECURITY.md) §6 and [`.env.example`](./.env.example) — `AI_WORKER_EXPECTED_TOKEN`, `MFAI_REQUIRE_WORKER_AUTH`, `GRPC_TLS_*`, `OLLAMA_BASE_URL`, etc.
-
-Configured in `docker-compose.dev.yml`:
-
-```yaml
-environment:
-  - PORT=50051
-```
-
-### Network Configuration
-
-The service runs on the `many_faces_main_dev-network` Docker network, allowing other services (like the backend API) to connect using the service name `ai-demo-dev` or container name.
-
-## Development
-
-### Generating gRPC Code
-
-**In Docker** (during build): `Dockerfile.dev` clones **`many_faces_proto`** and runs `grpc_tools.protoc` against **`health.proto`**.
-
-**Locally** (monorepo with submodules):
-
-```bash
-./scripts/generate_proto.sh
-```
-
-This generates:
-
-- `proto/health_pb2.py` - Protocol buffer message classes
-- `proto/health_pb2_grpc.py` - gRPC service stubs
-
-### Adding New RPC Methods
-
-1. **Update `many_faces_proto/proto/health.proto`** (open a PR in **`many_faces_proto`**, bump the submodule pin in **`many_faces_main`**):
-
-   ```protobuf
-   service HealthService {
-     rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
-     rpc NewMethod(NewMethodRequest) returns (NewMethodResponse);  // Add new method
-   }
-   ```
-
-2. **Regenerate proto files**: `./scripts/generate_proto.sh`
-
-3. **Implement method in `server.py`**:
-
-   ```python
-   def NewMethod(self, request, context):
-       return health_pb2.NewMethodResponse(status="ok")
-   ```
-
-4. **Rebuild Docker image**: `./scripts/rebuild-dev.sh`
+---
 
 ## Testing
 
-### Security regression (AIH1)
-
 ```bash
-./scripts/verify-ci.sh              # ruff + full pytest + *_security.py subset
-node ../scripts/verify-ai-security-tests.mjs   # from monorepo root
-./scripts/smoke-grpc-tls.sh         # optional transport smoke
+pytest                                          # all tests
+pytest tests/ -k "security"                    # AIH1 security subset
+node ../scripts/verify-ai-security-tests.mjs   # monorepo CI gate
 ```
 
-### Manual Testing
+---
 
-Use a gRPC client tool (e.g., `grpcurl`) to test the service:
+## Documentation
 
-```bash
-# List services
-grpcurl -plaintext localhost:50051 list
+| Doc                                                                                                    | Purpose                                                                 |
+| ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
+| [`docs/SECURITY.md`](./docs/SECURITY.md)                                                               | AIH1 security guide — auth, TLS, SSRF, moderation, production checklist |
+| [`docs/host-profile.md`](./docs/host-profile.md)                                                       | Host profile RPC and admin settings panel wiring                        |
+| [`docs/operator-live-stats-map-reduce.md`](./docs/operator-live-stats-map-reduce.md)                   | **Legacy** map-reduce — degraded fallback; RAG is the live path         |
+| [`docs/capability-roadmap-v0.9.0.md`](./docs/capability-roadmap-v0.9.0.md)                             | AI capability roadmap                                                   |
+| [`../docs/guides/operator-ai-rag-retrieval.md`](../docs/guides/operator-ai-rag-retrieval.md)           | Full RAG architecture + reindex runbook                                 |
+| [`../docs/guides/operator-ai-performance.md`](../docs/guides/operator-ai-performance.md)               | 7B tuning guide (GPU layers, flash attention, fast-paths)               |
+| [`../docs/guides/admin-operator-ai-chat-threads.md`](../docs/guides/admin-operator-ai-chat-threads.md) | Operator chat threads, pagination, retention                            |
+| [`../docs/guides/ai-assisted-content-approval.md`](../docs/guides/ai-assisted-content-approval.md)     | Content approval pipeline                                               |
+| [`../docs/guides/operator-ai-skills.md`](../docs/guides/operator-ai-skills.md)                         | Skills routing (stats, reports, moderation Q&A, general)                |
+| [`../docs/readmes/ai-grpc-overview.md`](../docs/readmes/ai-grpc-overview.md)                           | Monorepo-level AI gRPC overview                                         |
 
-# Call HealthCheck
-grpcurl -plaintext -d '{}' localhost:50051 HealthService/HealthCheck
-```
+---
 
-### From Backend API
+## Proto Contracts
 
-The backend API (**many_faces_backend** / `many_faces_backend/`) calls the health check on startup. Check backend logs to verify the connection:
-
-```bash
-docker logs be-demo-dev | grep -i "ai service"
-```
-
-## Development Workflow
-
-1. **Start database**: Ensure PostgreSQL is running (via `many_faces_database` or monorepo `./scripts/start-all-dev.sh`)
-
-2. **Start Many Faces AI service**: Run `./scripts/start-dev.sh` or use monorepo `./scripts/start-all-dev.sh` to start all services
-
-3. **Make code changes**: Edit `server.py` or the shared **`health.proto`** in **`many_faces_proto`**
-
-4. **Test changes**:
-   - Check service is responding: `docker logs ai-demo-dev`
-   - Verify backend can connect (check backend logs)
-
-5. **Rebuild if needed**: `./scripts/rebuild-dev.sh` (if proto files changed)
-
-6. **Stop services**: Run `./scripts/stop-dev.sh` or monorepo `./scripts/stop-all-dev.sh`
-
-## Integration with Root Project
-
-This Many Faces AI service is part of the **`many_faces_main`** monorepo (`many_faces_ai/` submodule on GitHub: `many_faces_ai`) and integrates with:
-
-- **Backend API**: **many_faces_backend** (`many_faces_backend/`, ASP.NET Core) — connects on startup for health check
-
-From the **many_faces_main** repository root, use the orchestration scripts to manage all services:
-
-- `./scripts/start-all-dev.sh` - Start all services with live status screen
-- `./scripts/stop-all-dev.sh` - Stop all services
-- `./scripts/clear-all-dev.sh` - Clear all containers and volumes
-- `./scripts/status-all.sh` - Show status of all services
-- `./scripts/rebuild-all-dev.sh` - Rebuild all Docker images
-
-## Troubleshooting
-
-### Port Already Allocated
-
-If port 50051 is already in use:
+Canonical `.proto` files live in the nested **`many_faces_proto`** submodule at `many_faces_ai/many_faces_proto/`.
 
 ```bash
-# Find process using port
-lsof -ti:50051
-
-# Kill process
-lsof -ti:50051 | xargs kill -9
-
-# Or use clear script
-./scripts/clear-dev.sh
+git submodule update --init --recursive   # populate nested submodule
+./scripts/generate_proto.sh               # regenerate Python stubs after proto changes
 ```
 
-### Proto Files Not Generated
+---
 
-If you see `ModuleNotFoundError` for proto files:
+## Suggested Future Capabilities
 
-- Proto files are generated during Docker build
-- Check `Dockerfile.dev` for proto generation steps
-- If needed, manually run `./scripts/generate_proto.sh` before starting container
+| Capability                      | Description                                                                                     |
+| ------------------------------- | ----------------------------------------------------------------------------------------------- |
+| **Context snapshots**           | Backend-provided payload describing faces, routes, page schemas, roles, and operational signals |
+| **Report generation**           | Typed RPCs for admin reports (face health, usage, content gaps)                                 |
+| **Feature review**              | AI-assisted checks for face page completeness and grid safety                                   |
+| **Chat risk scoring**           | Review of messages for spam, harassment, suspicious links, prompt-injection                     |
+| **Explainable recommendations** | Responses that include reason, confidence, and source context                                   |
+| **Audit-friendly logging**      | Request metadata and model decisions without leaking sensitive user content                     |
 
-### Backend Cannot Connect
+---
 
-- Ensure Many Faces AI service container is running: `docker ps | grep ai-demo-dev`
-- Check network: Both services should be on `many_faces_main_dev-network`
-- Verify port: Default is 50051
-- Check backend logs: `docker logs be-demo-dev | grep -i ai`
+## Legacy: Operator Statistics RPCs
 
-### Service Not Responding
+> **Legacy — replaced by RAG.** `inline`/`live` stats modes, `stats_context_json`, `FetchPublicStats`, and `OperatorStatsChat` are no longer used by the backend chat. The RAG path (`EmbedText` + `Generate`) replaced them. These RPCs remain on the worker for compatibility only.
 
-- Check container logs: `docker logs ai-demo-dev`
-- Verify container is running: `docker ps | grep ai-demo-dev`
-- Check health: `docker inspect ai-demo-dev --format '{{.State.Status}}'`
+---
 
-## Additional Notes
+## Project Status
 
-- **Proto Generation**: Proto files are generated during Docker build, not locally
-- **Network Access**: Service is accessible from other containers on the same Docker network
-- **Production security**: Optional gRPC TLS + `x-ai-worker-token`, worker SSRF policy, and startup validation — see [`docs/SECURITY.md`](./docs/SECURITY.md) §4–§10 (AIH1).
-
-## Monorepo documentation
-
-This repository is a **git submodule** of [`many_faces_main`](https://github.com/01laky/many_faces_main). Central guides and the documentation hub:
-
-- [docs/README.md](https://github.com/01laky/many_faces_main/blob/main/docs/README.md)
-- [docs/guides/ai-assisted-content-approval.md](https://github.com/01laky/many_faces_main/blob/main/docs/guides/ai-assisted-content-approval.md) — end-to-end moderation pipeline
-- [docs/guides/development.md](https://github.com/01laky/many_faces_main/blob/main/docs/guides/development.md) — `scripts/lint-all.sh`, CI expectations
-- [docs/guides/git-submodules.md](https://github.com/01laky/many_faces_main/blob/main/docs/guides/git-submodules.md) — submodule workflow
+Active AI adapter for the Many Faces AI monorepo. v0.10.0 — RAG operator chat (EmbedText + Generate + GenerateStream), content moderation (ReviewContent), skills routing, host profile, and full AIH1 security regression suite. Tracked in [`CHANGELOG.md`](./CHANGELOG.md).
