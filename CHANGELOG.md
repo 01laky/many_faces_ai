@@ -6,18 +6,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — **version h
 
 ### Release index
 
-| Version       | Theme                                 |
-| ------------- | ------------------------------------- |
-| [0.10.0](#0100) | 7B performance: streaming, helper   |
-| [0.9.0](#090) | Capability roadmap AI-UP1…UP20        |
-| [0.8.0](#080) | Phase A refactor, proto pin           |
-| [0.7.0](#070) | AIH1 gRPC TLS and token               |
-| [0.6.0](#060) | Live stats, host profile              |
-| [0.5.0](#050) | Ollama adapter, operator chat quality |
-| [0.4.0](#040) | Operator stats RPCs, shared proto     |
-| [0.3.0](#030) | Content review RPC                    |
-| [0.2.0](#020) | DistilGPT-2, verify-ci                |
-| [0.1.0](#010) | gRPC HealthService foundation         |
+| Version         | Theme                                 |
+| --------------- | ------------------------------------- |
+| [0.10.1](#0101) | CHANGELOG formatting normalization     |
+| [0.10.0](#0100) | 7B performance: streaming, helper     |
+| [0.9.0](#090)   | Capability roadmap AI-UP1…UP20        |
+| [0.8.0](#080)   | Phase A refactor, proto pin           |
+| [0.7.0](#070)   | AIH1 gRPC TLS and token               |
+| [0.6.0](#060)   | Live stats, host profile              |
+| [0.5.0](#050)   | Ollama adapter, operator chat quality |
+| [0.4.0](#040)   | Operator stats RPCs, shared proto     |
+| [0.3.0](#030)   | Content review RPC                    |
+| [0.2.0](#020)   | DistilGPT-2, verify-ci                |
+| [0.1.0](#010)   | gRPC HealthService foundation         |
 
 ## [Unreleased]
 
@@ -26,6 +27,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — **version h
 ### Changed
 
 ### Fixed
+
+---
+
+## [0.10.1]
+
+### Changed
+
+- Normalize the CHANGELOG release-index table formatting (Prettier markdown — column widths only). Documentation-only; no worker, proto, or runtime change.
 
 ---
 
@@ -164,7 +173,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — **version h
 
 - Python gRPC HealthService; Docker dev stack; Ruff and pytest health tests.
 
-[Unreleased]: https://github.com/01laky/many_faces_ai/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/01laky/many_faces_ai/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/01laky/many_faces_ai/compare/v0.10.0...v0.10.1
 [0.8.2]: https://github.com/01laky/many_faces_ai/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/01laky/many_faces_ai/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/01laky/many_faces_ai/compare/v0.7.0...v0.8.0
