@@ -8,7 +8,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — **version h
 
 | Version         | Theme                                 |
 | --------------- | ------------------------------------- |
-| [0.10.1](#0101) | CHANGELOG formatting normalization     |
+| [0.10.1](#0101) | CHANGELOG formatting normalization    |
 | [0.10.0](#0100) | 7B performance: streaming, helper     |
 | [0.9.0](#090)   | Capability roadmap AI-UP1…UP20        |
 | [0.8.0](#080)   | Phase A refactor, proto pin           |
@@ -87,14 +87,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — **version h
 
 - Add README shield badges (version, CI, stack tech) via sync-readme-badges.py.
 
-### Added
-
-- Add README shield badges (version, CI, stack tech) via sync-readme-badges.py.
-
-### Changed
-
-### Fixed
-
 ---
 
 ## [0.8.1]
@@ -102,14 +94,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — **version h
 ### Changed
 
 - Document project author (Ladislav Kostolny, 01laky@gmail.com) in README and standard manifests.
-
-### Added
-
-### Changed
-
-- Document project author (Ladislav Kostolny, 01laky@gmail.com) in README and standard manifests.
-
-### Fixed
 
 ---
 
