@@ -80,7 +80,8 @@ Smoke script: `./scripts/smoke-grpc-tls.sh` (plaintext HealthCheck + TLS path wh
 | `OLLAMA_MODEL_MODERATION`                  | No               | falls back to `OLLAMA_MODEL`        | Moderation model profile                        |
 | `MODERATION_RULES_AUTO_THRESHOLD`          | No               | `0.88`                              | Skip LLM when rules reject with high confidence |
 | `MFAI_ALLOW_HTTP_LOOPBACK`                 | Dev only         | implicit in dev                     | HTTP stats fetch to 127.0.0.1                   |
-| `AIH1_RPC_RATE_PER_MIN`                    | Optional         | unset                               | In-process rate limit                           |
+| `AIH1_RPC_RATE_PER_MIN`                    | Optional         | unset                               | Per-method RPC rate limit (per minute)          |
+| `AIH1_RPC_RATE_REDIS_URL`                  | Optional         | unset                               | Distributed limit via shared Redis (else local) |
 | `PORT`                                     | No               | `50051`                             | gRPC listen port                                |
 
 See [`.env.example`](../.env.example) for the full list.
@@ -145,10 +146,11 @@ Worker-side policy (`utils/outbound_url_policy.py`) mirrors backend `OutboundUrl
 | Track ID               | Topic                                                                              |
 | ---------------------- | ---------------------------------------------------------------------------------- |
 | `TRACK-AIH1-MTLS`      | Full mutual TLS instead of shared metadata token — see [`docs/mtls.md`](./mtls.md) |
-| `TRACK-AIH1-REDIS`     | Distributed rate limiting across worker replicas                                   |
 | `TRACK-AIH1-HOST-PORT` | Removing dev compose `50051:50051` host publish                                    |
 
 **Shipped (0.9.0):** LLM moderation path (**AI-UP1**), capability RPCs (**AI-UP1…20**). Roadmap: [`docs/capability-roadmap-v0.9.0.md`](./capability-roadmap-v0.9.0.md) · media pass: [`docs/moderation-media-pass.md`](./moderation-media-pass.md).
+
+**Shipped (`TRACK-AIH1-REDIS`):** the per-method RPC rate limit (`AIH1_RPC_RATE_PER_MIN`) is now **distributed** when `AIH1_RPC_RATE_REDIS_URL` is set — a shared Redis fixed-window counter (`INCR` + 60s `EXPIRE`) coordinates the limit across worker replicas. The `redis` package is imported lazily only when that URL is set, so the base worker keeps no hard Redis dependency, and the limiter **fails open** (and falls back to the in-process counter) if Redis is missing or unreachable, so an outage never hard-blocks inference. See `utils/rpc_rate_limit.py`.
 
 ## 12. Reporting issues
 

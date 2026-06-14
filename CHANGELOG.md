@@ -8,6 +8,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — **version h
 
 | Version         | Theme                                 |
 | --------------- | ------------------------------------- |
+| [0.10.3](#0103) | Distributed RPC rate limit (Redis)    |
 | [0.10.2](#0102) | host_profile_snapshot edge tests      |
 | [0.10.1](#0101) | CHANGELOG formatting normalization    |
 | [0.10.0](#0100) | 7B performance: streaming, helper     |
@@ -28,6 +29,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — **version h
 ### Changed
 
 ### Fixed
+
+---
+
+## [0.10.3]
+
+### Added
+
+- **Distributed RPC rate limiting (`TRACK-AIH1-REDIS`).** The optional per-method RPC limit
+  (`AIH1_RPC_RATE_PER_MIN`) becomes **distributed across worker replicas** when `AIH1_RPC_RATE_REDIS_URL` is
+  set: a shared Redis fixed-window counter (`INCR` + 60-second `EXPIRE`) coordinates the limit. The `redis`
+  package is imported lazily and only when that URL is set, so the base worker keeps **no hard Redis
+  dependency**, and the limiter **fails open** (and falls back to the in-process counter) if Redis is missing
+  or unreachable — an outage never hard-blocks inference. Default behaviour (no URL) is unchanged. New
+  edge-case tests via an injected fake client (count→limit→reject, TTL-set-once, per-method isolation,
+  disabled-when-no-limit short-circuits Redis, Redis-outage fail-open); suite 287 → 292.
 
 ---
 
@@ -166,7 +182,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — **version h
 
 - Python gRPC HealthService; Docker dev stack; Ruff and pytest health tests.
 
-[Unreleased]: https://github.com/01laky/many_faces_ai/compare/v0.10.2...HEAD
+[Unreleased]: https://github.com/01laky/many_faces_ai/compare/v0.10.3...HEAD
+[0.10.3]: https://github.com/01laky/many_faces_ai/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/01laky/many_faces_ai/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/01laky/many_faces_ai/compare/v0.10.0...v0.10.1
 [0.8.2]: https://github.com/01laky/many_faces_ai/compare/v0.8.1...v0.8.2
