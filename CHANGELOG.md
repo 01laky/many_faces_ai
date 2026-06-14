@@ -8,6 +8,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — **version h
 
 | Version         | Theme                                 |
 | --------------- | ------------------------------------- |
+| [0.10.2](#0102) | host_profile_snapshot edge tests      |
 | [0.10.1](#0101) | CHANGELOG formatting normalization    |
 | [0.10.0](#0100) | 7B performance: streaming, helper     |
 | [0.9.0](#090)   | Capability roadmap AI-UP1…UP20        |
@@ -27,6 +28,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — **version h
 ### Changed
 
 ### Fixed
+
+---
+
+## [0.10.2]
+
+### Added
+
+- Unit tests for the previously-untested `services.host_profile_snapshot` module (unit-test-gap-fill): `write_host_snapshot` (rejects a mismatched `schemaVersion`, writes sorted JSON with a trailing newline, and creates parent directories) and `build_host_snapshot` (marks a real host and strips the live `aiRuntime` block; marks a container otherwise). The existing host-refresh test mocks a different script module, so this code path had no direct coverage.
 
 ---
 
@@ -157,7 +166,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — **version h
 
 - Python gRPC HealthService; Docker dev stack; Ruff and pytest health tests.
 
-[Unreleased]: https://github.com/01laky/many_faces_ai/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/01laky/many_faces_ai/compare/v0.10.2...HEAD
+[0.10.2]: https://github.com/01laky/many_faces_ai/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/01laky/many_faces_ai/compare/v0.10.0...v0.10.1
 [0.8.2]: https://github.com/01laky/many_faces_ai/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/01laky/many_faces_ai/compare/v0.8.0...v0.8.1
