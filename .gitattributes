@@ -1,0 +1,6 @@
+# Shell scripts must always check out with LF endings. They run inside the
+# Linux dev container, and docker-compose.dev.yml bind-mounts scripts/ directly
+# into /app/scripts — so a CRLF entrypoint.sh makes /bin/sh fail with
+# "set: Illegal option -" and the container crash-loops. eol=lf overrides
+# core.autocrlf on Windows checkouts.
+*.sh text eol=lf
