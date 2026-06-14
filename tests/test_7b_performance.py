@@ -120,8 +120,11 @@ class _FakeAI:
 
 class TestO1KeepAlive:
 	def test_o1_u1_keep_alive_default_is_minus_one(self, monkeypatch):
+		# Default -1 must be the int (JSON number), not the string "-1" which Ollama
+		# rejects as an invalid duration.
 		monkeypatch.delenv("OLLAMA_KEEP_ALIVE", raising=False)
-		assert _keep_alive() == "-1"
+		assert _keep_alive() == -1
+		assert isinstance(_keep_alive(), int)
 
 	def test_o1_u2_keep_alive_in_generate_payload(self, monkeypatch):
 		monkeypatch.delenv("OLLAMA_KEEP_ALIVE", raising=False)
@@ -135,11 +138,23 @@ class TestO1KeepAlive:
 
 		svc._ollama_post_json = fake_post  # type: ignore[method-assign]
 		svc.generate("User: hi")
-		assert captured["payload"]["keep_alive"] == "-1"
+		assert captured["payload"]["keep_alive"] == -1
 
 	def test_o1_u3_keep_alive_env_override_respected(self, monkeypatch):
+		# A duration string passes through unchanged (valid for Ollama).
 		monkeypatch.setenv("OLLAMA_KEEP_ALIVE", "30m")
 		assert _keep_alive() == "30m"
+
+	def test_o1_u4_keep_alive_zero_is_int(self, monkeypatch):
+		# "0" (unload immediately) coerces to the int 0, not the string.
+		monkeypatch.setenv("OLLAMA_KEEP_ALIVE", "0")
+		assert _keep_alive() == 0
+		assert isinstance(_keep_alive(), int)
+
+	def test_o1_u5_keep_alive_explicit_minus_one_is_int(self, monkeypatch):
+		monkeypatch.setenv("OLLAMA_KEEP_ALIVE", "-1")
+		assert _keep_alive() == -1
+		assert isinstance(_keep_alive(), int)
 
 
 class TestO11PerCallSampling:
@@ -236,6 +251,57 @@ class TestO19ModelOverride:
 		assert _PROFILE_ENV[PROFILE_HELPER] == "OLLAMA_MODEL_HELPER"
 		monkeypatch.setenv("OLLAMA_MODEL_HELPER", "qwen2.5:0.5b")
 		assert resolve_model(PROFILE_HELPER) == "qwen2.5:0.5b"
+
+
+class TestPerModelGpuOffload:
+	"""Per-model num_gpu: the main model uses GPU offload, the helper is pinned to CPU."""
+
+	def test_helper_forced_cpu_when_knob_unset(self, monkeypatch):
+		# Helper model configured, OLLAMA_NUM_GPU_HELPER absent -> helper still pinned to
+		# CPU (num_gpu=0). Pinning the helper to CPU is the whole point, so an unset knob
+		# must NOT leave num_gpu off.
+		monkeypatch.setenv("OLLAMA_MODEL_HELPER", "qwen2.5:3b")
+		monkeypatch.delenv("OLLAMA_NUM_GPU_HELPER", raising=False)
+		monkeypatch.delenv("OLLAMA_NUM_GPU", raising=False)
+		opts = _service()._ollama_options(64, model="qwen2.5:3b")
+		assert opts["num_gpu"] == 0
+
+	def test_helper_honors_helper_knob(self, monkeypatch):
+		monkeypatch.setenv("OLLAMA_MODEL_HELPER", "qwen2.5:3b")
+		monkeypatch.setenv("OLLAMA_NUM_GPU_HELPER", "5")
+		opts = _service()._ollama_options(64, model="qwen2.5:3b")
+		assert opts["num_gpu"] == 5
+
+	def test_main_honors_num_gpu(self, monkeypatch):
+		monkeypatch.setenv("OLLAMA_MODEL_HELPER", "qwen2.5:3b")
+		monkeypatch.setenv("OLLAMA_NUM_GPU", "20")
+		opts = _service()._ollama_options(64, model="test-7b")
+		assert opts["num_gpu"] == 20
+
+	def test_main_omits_num_gpu_when_unset(self, monkeypatch):
+		# Main model + OLLAMA_NUM_GPU unset -> omit num_gpu so Ollama auto-offloads the
+		# max layers that fit (GPU-first).
+		monkeypatch.setenv("OLLAMA_MODEL_HELPER", "qwen2.5:3b")
+		monkeypatch.delenv("OLLAMA_NUM_GPU", raising=False)
+		opts = _service()._ollama_options(64, model="test-7b")
+		assert "num_gpu" not in opts
+
+	def test_unset_helper_env_does_not_misclassify_main(self, monkeypatch):
+		# OLLAMA_MODEL_HELPER unset: resolve_model(PROFILE_HELPER) falls back to the main
+		# model, but the guard must NOT treat the main call as the helper. With
+		# OLLAMA_NUM_GPU unset the main model omits num_gpu (it is NOT forced to 0).
+		monkeypatch.delenv("OLLAMA_MODEL_HELPER", raising=False)
+		monkeypatch.delenv("OLLAMA_NUM_GPU", raising=False)
+		monkeypatch.delenv("OLLAMA_NUM_GPU_HELPER", raising=False)
+		opts = _service()._ollama_options(64, model="test-7b")
+		assert "num_gpu" not in opts
+
+	def test_num_batch_stays_global_across_models(self, monkeypatch):
+		monkeypatch.setenv("OLLAMA_MODEL_HELPER", "qwen2.5:3b")
+		monkeypatch.setenv("OLLAMA_NUM_BATCH", "128")
+		svc = _service()
+		assert svc._ollama_options(64, model="test-7b")["num_batch"] == 128
+		assert svc._ollama_options(64, model="qwen2.5:3b")["num_batch"] == 128
 
 
 class TestO4Streaming:

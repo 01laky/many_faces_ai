@@ -8,6 +8,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — **version h
 
 | Version         | Theme                                 |
 | --------------- | ------------------------------------- |
+| [0.11.0](#0110) | Per-model GPU offload (7B GPU, helper CPU) |
 | [0.10.3](#0103) | Distributed RPC rate limit (Redis)    |
 | [0.10.2](#0102) | host_profile_snapshot edge tests      |
 | [0.10.1](#0101) | CHANGELOG formatting normalization    |
@@ -29,6 +30,38 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — **version h
 ### Changed
 
 ### Fixed
+
+---
+
+## [0.11.0]
+
+### Added
+
+- **Per-model GPU offload (`OLLAMA_NUM_GPU_HELPER`).** `_ollama_options` now selects the Ollama
+  `num_gpu` (GPU layer offload count) **per model** instead of from a single global env. The small
+  routing/gating **helper** model (`OLLAMA_MODEL_HELPER`) is pinned to the **CPU** via the new
+  `OLLAMA_NUM_GPU_HELPER` env (default `0` = CPU-only, even when unset — pinning the helper is the
+  whole point), while the **main** model keeps honoring `OLLAMA_NUM_GPU` and **omits** it when
+  unset so Ollama auto-offloads the maximum layers that fit in VRAM (GPU-first, remainder on CPU).
+  This lets the big 7B run on the GPU while the 3B helper stays on the CPU, instead of both sharing
+  one global knob. A helper-detection guard avoids `resolve_model(PROFILE_HELPER)`'s fallback to the
+  main model mis-classifying a normal main-model call as the helper. `num_batch` stays global. The
+  `model` is threaded into `_ollama_options` from both the non-streaming and streaming call sites.
+  New unit tests cover helper-forced-CPU (knob set/unset), main honors/omits `num_gpu`, the
+  unset-`OLLAMA_MODEL_HELPER` guard, and global `num_batch`; suite 292 → 298.
+
+### Fixed
+
+- **`OLLAMA_KEEP_ALIVE` sent as a JSON number for bare integers.** Ollama (0.30.x) parses a
+  request-body `keep_alive` **string** as a Go duration, so the bare string `"-1"` is rejected on
+  both `/api/chat` and `/api/embeddings` with `time: missing unit in duration "-1"` — which made
+  **generation and embeddings fail** whenever `OLLAMA_KEEP_ALIVE=-1` (and `-1` is the worker's own
+  default, so it was broken out-of-the-box on this Ollama version; it only worked when overridden
+  with a duration like `30m`). New `utils.env.keep_alive_value()` coerces a bare-integer value
+  (`-1`, `0`, `300`) to a Python int → JSON number (Ollama accepts `-1` = forever, `0` = unload
+  now), and passes duration strings (`30m`, `24h`) through unchanged. Used at all three send sites:
+  `_keep_alive()` (both `/api/chat` call sites) and `services/embed_text.py` (`/api/embeddings`).
+  New tests: `-1`/unset → int `-1`, `0` → int `0`, `30m` → `"30m"`; suite 298 → 300.
 
 ---
 

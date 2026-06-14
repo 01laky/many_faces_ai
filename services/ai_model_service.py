@@ -14,8 +14,9 @@ import urllib.request
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
-from utils.env import env_float, env_int, ollama_base_url
+from utils.env import env_float, env_int, env_str, keep_alive_value, ollama_base_url
 from utils.log_redaction import redact_sensitive
+from utils.model_routing import PROFILE_HELPER, resolve_model
 
 logger = logging.getLogger(__name__)
 
@@ -26,18 +27,22 @@ DEFAULT_MAX_NEW_TOKENS = 256
 DEFAULT_MAX_NEW_TOKENS_CAP = 384
 
 
-def _keep_alive() -> str:
+def _keep_alive() -> int | str:
 	"""
 	7B-perf O1: how long Ollama keeps the model resident after a request.
 
 	The worker runs against a dedicated PC whose only job is to host the 7B
 	operator model, so the cheapest path to low first-token latency is to keep
-	the model permanently loaded ("-1" = never evict). The old "30m" default
+	the model permanently loaded (-1 = never evict). The old "30m" default
 	forced a multi-second cold reload whenever the operator paused between
 	questions. Operators can still override via OLLAMA_KEEP_ALIVE (e.g. "30m"
 	on a shared dev box where VRAM must be released).
+
+	Returns an int for bare-integer values (so -1 is sent as a JSON number, which
+	Ollama requires — the string "-1" is rejected as an invalid duration) and a
+	duration string otherwise. See utils.env.keep_alive_value.
 	"""
-	return os.getenv("OLLAMA_KEEP_ALIVE", "-1")
+	return keep_alive_value()
 
 
 def _thread_count() -> int:
@@ -333,6 +338,7 @@ class AIModelService:
 		*,
 		temperature: float | None = None,
 		stop: list[str] | None = None,
+		model: str | None = None,
 	) -> dict:
 		options = {
 			"num_ctx": env_int("OLLAMA_NUM_CTX", 4096),
@@ -343,17 +349,44 @@ class AIModelService:
 			"top_k": env_int("OLLAMA_TOP_K", 40),
 			"repeat_penalty": env_float("OLLAMA_REPEAT_PENALTY", 1.15),
 		}
-		for option_name, env_name in {
-			"num_gpu": "OLLAMA_NUM_GPU",
-			"num_batch": "OLLAMA_NUM_BATCH",
-		}.items():
-			raw = os.getenv(env_name)
-			if raw is None or not raw.strip():
-				continue
+		# num_batch is a single global knob shared by every model (prompt-processing
+		# batch size); only forward it when explicitly set to a valid int.
+		raw_batch = os.getenv("OLLAMA_NUM_BATCH")
+		if raw_batch is not None and raw_batch.strip():
 			try:
-				options[option_name] = int(raw)
+				options["num_batch"] = int(raw_batch)
 			except ValueError:
-				logger.warning("Ignoring invalid %s=%r", env_name, raw)
+				logger.warning("Ignoring invalid %s=%r", "OLLAMA_NUM_BATCH", raw_batch)
+
+		# Per-model GPU offload. In Ollama, `num_gpu` = number of transformer layers
+		# placed on the GPU (0 = CPU-only). We deliberately run the big main model with
+		# GPU offload while pinning the small routing/gating helper model to the CPU, so
+		# the scarce VRAM is spent entirely on main-model layers.
+		#
+		# Helper-detection guard: resolve_model(PROFILE_HELPER) falls back to the MAIN
+		# model when OLLAMA_MODEL_HELPER is unset, so comparing against it blindly would
+		# mis-classify a normal main-model call as "helper". We therefore only treat a
+		# call as the helper when OLLAMA_MODEL_HELPER is explicitly set AND equals the
+		# model used for this call.
+		helper_model = (
+			resolve_model(PROFILE_HELPER) if env_str("OLLAMA_MODEL_HELPER", "").strip() else ""
+		)
+		is_helper = bool(helper_model) and (model or "").strip() == helper_model
+		if is_helper:
+			# Helper → force CPU. An unset/empty OLLAMA_NUM_GPU_HELPER defaults to 0
+			# (CPU-only) — that is the whole point of this knob — so we ALWAYS send
+			# num_gpu for the helper, even when the env var is absent.
+			options["num_gpu"] = env_int("OLLAMA_NUM_GPU_HELPER", 0)
+		else:
+			# Main / any non-helper model → honor OLLAMA_NUM_GPU when set to a valid int.
+			# When unset/empty we OMIT num_gpu entirely so Ollama auto-decides the max
+			# number of layers that fit in VRAM (GPU-first, remainder on CPU).
+			raw_gpu = os.getenv("OLLAMA_NUM_GPU")
+			if raw_gpu is not None and raw_gpu.strip():
+				try:
+					options["num_gpu"] = int(raw_gpu)
+				except ValueError:
+					logger.warning("Ignoring invalid %s=%r", "OLLAMA_NUM_GPU", raw_gpu)
 		# 7B-perf O11: per-call sampling overrides. The backend's terse per-bundle
 		# MAP step wants a low, deterministic temperature plus hard stop sequences so
 		# the model cannot ramble past the structured answer. These overrides apply
@@ -389,7 +422,9 @@ class AIModelService:
 			"stream": False,
 			# 7B-perf O1: keep the model resident between calls (see _keep_alive()).
 			"keep_alive": _keep_alive(),
-			"options": self._ollama_options(max_new_tokens, temperature=temperature, stop=stop),
+			"options": self._ollama_options(
+				max_new_tokens, temperature=temperature, stop=stop, model=call_model
+			),
 		}
 		data = self._ollama_post_json(
 			"/api/chat",
@@ -528,7 +563,9 @@ class AIModelService:
 			"stream": True,
 			# O1: keep the streaming model resident too.
 			"keep_alive": _keep_alive(),
-			"options": self._ollama_options(max_tok, temperature=temperature, stop=stop),
+			"options": self._ollama_options(
+				max_tok, temperature=temperature, stop=stop, model=call_model
+			),
 		}
 		body = json.dumps(payload).encode("utf-8")
 		req = urllib.request.Request(
