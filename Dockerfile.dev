@@ -29,8 +29,13 @@ RUN sed -i 's/^from health_pb2/from proto.health_pb2/' proto/health_pb2_grpc.py 
 
 # Copy application code (server + AI model service)
 COPY server.py .
+# Top-level modules imported as siblings of server.py (handlers -> moderation_input_sanitize,
+# scripts/refresh_host_snapshot.py -> bootstrap).
+COPY moderation_input_sanitize.py .
+COPY bootstrap.py .
 COPY services/ services/
 COPY utils/ utils/
+COPY handlers/ handlers/
 COPY scripts/ scripts/
 
 # Create proto/__init__.py if it doesn't exist (allows proto to be imported as package)
