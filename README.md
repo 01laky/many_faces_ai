@@ -2,7 +2,7 @@
 
 <!-- readme-badges:start -->
 
-[![version](https://img.shields.io/badge/version-0.11.0-blue)](./VERSION)
+[![version](https://img.shields.io/badge/version-0.12.0-blue)](./VERSION)
 ![Python](https://img.shields.io/badge/Python-3.11-3776AB)
 ![gRPC](https://img.shields.io/badge/gRPC-1.80-244c5a)
 ![Ollama](https://img.shields.io/badge/Ollama-host-black)
@@ -12,7 +12,7 @@
 
 <!-- readme-badges:end -->
 
-**Version:** [`0.11.0`](./VERSION) · [Changelog](./CHANGELOG.md) · [Capability roadmap](./docs/capability-roadmap-v0.9.0.md)
+**Version:** [`0.12.0`](./VERSION) · [Changelog](./CHANGELOG.md) · [Capability roadmap](./docs/capability-roadmap-v0.9.0.md)
 
 **Author:** Ladislav Kostolny · [01laky@gmail.com](mailto:01laky@gmail.com)
 
