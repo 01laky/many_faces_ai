@@ -17,6 +17,12 @@ import psutil
 
 from utils.env import env_int_optional, ollama_base_url
 from utils.http_json import get_json, post_json
+from utils.model_routing import (
+	PROFILE_CHAT,
+	PROFILE_EMBED,
+	PROFILE_HELPER,
+	resolve_model,
+)
 
 COLLECTOR_VERSION = "1.0.0"
 SCHEMA_VERSION = 1
@@ -507,6 +513,74 @@ def _merge_injected_with_runtime(
 	return profile
 
 
+def _normalize_model_name(name: str) -> str:
+	"""Ollama reports e.g. ``qwen2.5:3b-instruct-q4_K_M``; treat a bare ``:latest`` as the base name."""
+	value = (name or "").strip()
+	if value.endswith(":latest"):
+		value = value[: -len(":latest")]
+	return value
+
+
+def _model_show_detail(base: str, model_name: str, warnings: list[str]) -> dict[str, Any]:
+	"""``/api/show`` → normalized detail dict (family / parameterSize / quantizationLevel / format / modelSizeBytes)."""
+	show = _http_post_json(f"{base}/api/show", {"model": model_name}, OLLAMA_PROBE_TIMEOUT_SECONDS)
+	detail: dict[str, Any] = {}
+	if not show:
+		warnings.append(f"Ollama /api/show failed for {model_name}")
+		return detail
+	details = show.get("details") if isinstance(show.get("details"), dict) else {}
+	for key, target in (
+		("family", "family"),
+		("parameter_size", "parameterSize"),
+		("quantization_level", "quantizationLevel"),
+		("format", "format"),
+	):
+		value = details.get(key)
+		if value:
+			detail[target] = value
+	size = show.get("size")
+	if isinstance(size, int):
+		detail["modelSizeBytes"] = size
+	return detail
+
+
+def _role_model_map() -> dict[str, list[str]]:
+	"""Resolved model name → the roles it serves, deduped.
+
+	A role whose env is unset falls back to ``OLLAMA_MODEL`` (`resolve_model`), so it is the *same*
+	model serving multiple roles — one entry, multiple role labels — never a duplicate row.
+	"""
+	role_labels = (
+		(PROFILE_CHAT, "chat"),
+		(PROFILE_HELPER, "helper"),
+		(PROFILE_EMBED, "embed"),
+	)
+	out: dict[str, list[str]] = {}
+	for profile, label in role_labels:
+		name = resolve_model(profile)
+		if not name:
+			continue
+		roles = out.setdefault(name, [])
+		if label not in roles:
+			roles.append(label)
+	return out
+
+
+def _runs_on_for(processor: str | None, roles: list[str]) -> str:
+	"""GPU/CPU from the live ``/api/ps`` processor string, else a role heuristic (chat→gpu, helper/embed→cpu)."""
+	if processor:
+		low = processor.lower()
+		if "gpu" in low:
+			return "gpu"
+		if "cpu" in low:
+			return "cpu"
+	if "chat" in roles:
+		return "gpu"
+	if "helper" in roles or "embed" in roles:
+		return "cpu"
+	return "unknown"
+
+
 def _collect_ollama_runtime(model_name: str, warnings: list[str]) -> dict[str, Any]:
 	base = _ollama_base_url()
 	runtime: dict[str, Any] = {
@@ -529,31 +603,12 @@ def _collect_ollama_runtime(model_name: str, warnings: list[str]) -> dict[str, A
 		warnings.append("Ollama unreachable")
 		return runtime
 
-	show = _http_post_json(
-		f"{base}/api/show",
-		{"model": model_name},
-		OLLAMA_PROBE_TIMEOUT_SECONDS,
-	)
-	if show:
-		details = show.get("details") if isinstance(show.get("details"), dict) else {}
-		detail: dict[str, Any] = {}
-		for key, target in (
-			("family", "family"),
-			("parameter_size", "parameterSize"),
-			("quantization_level", "quantizationLevel"),
-			("format", "format"),
-		):
-			value = details.get(key)
-			if value:
-				detail[target] = value
-		size = show.get("size")
-		if isinstance(size, int):
-			detail["modelSizeBytes"] = size
-		if detail:
-			runtime["ollamaModelDetail"] = detail
-	else:
-		warnings.append("Ollama /api/show failed")
+	# Back-compat: detail for the single configured (chat) model.
+	main_detail = _model_show_detail(base, model_name, warnings)
+	if main_detail:
+		runtime["ollamaModelDetail"] = main_detail
 
+	# Loaded models (point-in-time, /api/ps) — kept for back-compat + cross-referenced below.
 	ps_payload = _http_get_json(f"{base}/api/ps", OLLAMA_PROBE_TIMEOUT_SECONDS)
 	loaded: list[dict[str, Any]] = []
 	if isinstance(ps_payload, dict):
@@ -575,6 +630,71 @@ def _collect_ollama_runtime(model_name: str, warnings: list[str]) -> dict[str, A
 			if entry:
 				loaded.append(entry)
 	runtime["ollamaLoadedModels"] = loaded
+
+	# Ollama server version (/api/version).
+	version_payload = _http_get_json(f"{base}/api/version", OLLAMA_PROBE_TIMEOUT_SECONDS)
+	if isinstance(version_payload, dict) and version_payload.get("version"):
+		runtime["ollamaServerVersion"] = version_payload["version"]
+
+	# All configured models by role (chat / helper / embed), cross-referenced with pulled + loaded state.
+	pulled = {
+		_normalize_model_name(str(m.get("name") or m.get("model") or ""))
+		for m in (tags.get("models") or [])
+		if isinstance(m, dict)
+	}
+	pulled.discard("")
+	loaded_by_name: dict[str, dict[str, Any]] = {}
+	for item in loaded:
+		key = _normalize_model_name(str(item.get("name", "")))
+		if key:
+			loaded_by_name[key] = item
+
+	configured: list[dict[str, Any]] = []
+	vram_used = 0
+	for name, roles in _role_model_map().items():
+		norm = _normalize_model_name(name)
+		ps_entry = loaded_by_name.get(norm)
+		entry: dict[str, Any] = {
+			"roles": roles,
+			"name": name,
+			"pulled": norm in pulled,
+			"loaded": ps_entry is not None,
+			"reachable": True,
+			"runsOn": _runs_on_for((ps_entry or {}).get("processor"), roles),
+		}
+		processor = (ps_entry or {}).get("processor")
+		if processor:
+			entry["processor"] = processor
+		vram = (ps_entry or {}).get("sizeVramBytes")
+		if isinstance(vram, int):
+			entry["vramBytes"] = vram
+			vram_used += vram
+		size_bytes = (ps_entry or {}).get("sizeBytes")
+		if isinstance(size_bytes, int):
+			entry["sizeBytes"] = size_bytes
+		detail = main_detail if name == model_name else _model_show_detail(base, name, warnings)
+		if detail:
+			entry["detail"] = detail
+			if detail.get("quantizationLevel"):
+				entry["quantization"] = detail["quantizationLevel"]
+		# Global OLLAMA_NUM_CTX / OLLAMA_NUM_GPU apply to the main (chat) model.
+		if "chat" in roles:
+			if "ollamaContextLength" in runtime:
+				entry["contextLength"] = runtime["ollamaContextLength"]
+			if "ollamaNumGpu" in runtime:
+				entry["numGpu"] = runtime["ollamaNumGpu"]
+		configured.append(entry)
+	runtime["configuredModels"] = configured
+	if vram_used:
+		runtime["vramUsedBytes"] = vram_used
+
+	try:
+		uptime = datetime.now(UTC).timestamp() - psutil.Process().create_time()
+		if uptime >= 0:
+			runtime["workerUptimeSeconds"] = int(uptime)
+	except (psutil.Error, OSError):
+		pass
+
 	return runtime
 
 

@@ -8,6 +8,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — **version h
 
 | Version         | Theme                                 |
 | --------------- | ------------------------------------- |
+| [0.12.0](#0120) | Host profile: all models by role (chat/helper/embed) |
 | [0.11.0](#0110) | Per-model GPU offload (7B GPU, helper CPU) |
 | [0.10.3](#0103) | Distributed RPC rate limit (Redis)    |
 | [0.10.2](#0102) | host_profile_snapshot edge tests      |
@@ -30,6 +31,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — **version h
 ### Changed
 
 ### Fixed
+
+---
+
+## [0.12.0]
+
+### Added
+
+- Host profile now enumerates **all configured Ollama models by role** (chat / helper / embed via `model_routing`) under `aiRuntime.configuredModels[]` — each with `pulled` (`/api/tags`), `loaded`/VRAM/processor (`/api/ps`), `/api/show` detail, runs-on (GPU/CPU), deduped by resolved name (a role that falls back to `OLLAMA_MODEL` shares one entry) — plus `ollamaServerVersion` (`/api/version`), `vramUsedBytes`, and `workerUptimeSeconds`. Existing single-model `ollamaModelConfigured`/`ollamaModelDetail`/`ollamaLoadedModels` kept for back-compat; flows through the Windows-injected merge unchanged (JSON-additive, no proto change).
 
 ---
 
@@ -215,7 +224,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — **version h
 
 - Python gRPC HealthService; Docker dev stack; Ruff and pytest health tests.
 
-[Unreleased]: https://github.com/01laky/many_faces_ai/compare/v0.10.3...HEAD
+[Unreleased]: https://github.com/01laky/many_faces_ai/compare/v0.12.0...HEAD
 [0.10.3]: https://github.com/01laky/many_faces_ai/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/01laky/many_faces_ai/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/01laky/many_faces_ai/compare/v0.10.0...v0.10.1
@@ -230,3 +239,4 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — **version h
 [0.2.0]: https://github.com/01laky/many_faces_ai/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/01laky/many_faces_ai/releases/tag/v0.1.0
 [0.10.0]: https://github.com/01laky/many_faces_ai/compare/v0.9.0...v0.10.0
+[0.12.0]: https://github.com/01laky/many_faces_ai/compare/v0.11.0...v0.12.0

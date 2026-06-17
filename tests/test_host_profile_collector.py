@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from services.host_profile_collector import collect_host_profile
+from services.host_profile_collector import _collect_ollama_runtime, collect_host_profile
 
 
 @pytest.fixture
@@ -185,6 +185,87 @@ def test_ollama_http_probe_integration(base_env, monkeypatch):
 	assert runtime["ollamaNumGpu"] == 999
 	assert runtime["ollamaModelDetail"]["parameterSize"] == "7.6B"
 	json.dumps(profile)
+
+
+def test_ollama_configured_models_by_role(base_env, monkeypatch):
+	# Three distinct models: 7B chat (loaded on GPU), 3B helper (pulled, not loaded), nomic embed (not pulled).
+	monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:7b")
+	monkeypatch.setenv("OLLAMA_MODEL_HELPER", "qwen2.5:3b")
+	monkeypatch.setenv("OLLAMA_MODEL_EMBED", "nomic-embed-text")
+	monkeypatch.delenv("OLLAMA_MODEL_CHAT", raising=False)
+
+	def fake_get(url, timeout):
+		if url.endswith("/api/tags"):
+			return {"models": [{"name": "qwen2.5:7b"}, {"name": "qwen2.5:3b"}]}
+		if url.endswith("/api/ps"):
+			return {
+				"models": [
+					{
+						"name": "qwen2.5:7b",
+						"size": 5_000,
+						"size_vram": 4_000,
+						"processor": "100% GPU",
+					}
+				]
+			}
+		if url.endswith("/api/version"):
+			return {"version": "0.3.14"}
+		return None
+
+	def fake_post(url, payload, timeout):
+		if url.endswith("/api/show"):
+			return {"size": 10, "details": {"family": "qwen2", "quantization_level": "Q4_K_M"}}
+		return None
+
+	with patch("services.host_profile_collector._http_get_json", side_effect=fake_get):
+		with patch("services.host_profile_collector._http_post_json", side_effect=fake_post):
+			runtime = _collect_ollama_runtime("qwen2.5:7b", [])
+
+	assert runtime["ollamaServerVersion"] == "0.3.14"
+	by_name = {m["name"]: m for m in runtime["configuredModels"]}
+	assert set(by_name) == {"qwen2.5:7b", "qwen2.5:3b", "nomic-embed-text"}
+
+	chat = by_name["qwen2.5:7b"]
+	assert "chat" in chat["roles"]
+	assert chat["pulled"] is True and chat["loaded"] is True
+	assert chat["runsOn"] == "gpu"
+	assert chat["vramBytes"] == 4_000
+
+	helper = by_name["qwen2.5:3b"]
+	assert helper["roles"] == ["helper"]
+	assert helper["pulled"] is True and helper["loaded"] is False
+	assert helper["runsOn"] == "cpu"
+
+	embed = by_name["nomic-embed-text"]
+	assert embed["roles"] == ["embed"]
+	assert embed["pulled"] is False and embed["loaded"] is False
+
+	assert runtime["vramUsedBytes"] == 4_000
+
+
+def test_ollama_configured_models_dedupe_fallback(base_env, monkeypatch):
+	# Helper/embed env unset → both fall back to OLLAMA_MODEL → one entry serving all three roles.
+	monkeypatch.setenv("OLLAMA_MODEL", "solo-model")
+	monkeypatch.delenv("OLLAMA_MODEL_CHAT", raising=False)
+	monkeypatch.delenv("OLLAMA_MODEL_HELPER", raising=False)
+	monkeypatch.delenv("OLLAMA_MODEL_EMBED", raising=False)
+
+	def fake_get(url, timeout):
+		if url.endswith("/api/tags"):
+			return {"models": [{"name": "solo-model"}]}
+		return {"models": []} if url.endswith("/api/ps") else None
+
+	def fake_post(url, payload, timeout):
+		return {"size": 1, "details": {}} if url.endswith("/api/show") else None
+
+	with patch("services.host_profile_collector._http_get_json", side_effect=fake_get):
+		with patch("services.host_profile_collector._http_post_json", side_effect=fake_post):
+			runtime = _collect_ollama_runtime("solo-model", [])
+
+	assert len(runtime["configuredModels"]) == 1
+	only = runtime["configuredModels"][0]
+	assert only["name"] == "solo-model"
+	assert sorted(only["roles"]) == ["chat", "embed", "helper"]
 
 
 def test_hp_injected_snapshot_merges_host_gpu(base_env, tmp_path, monkeypatch):
