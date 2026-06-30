@@ -88,7 +88,6 @@ except (ImportError, ModuleNotFoundError, FileNotFoundError) as e:
 
 from handlers.rpc_handlers import RpcHandlers  # noqa: E402
 from utils.grpc_worker_auth import WorkerAuthInterceptor, expected_token_from_env  # noqa: E402
-from utils.log_redaction import redact_sensitive  # noqa: E402
 from utils.rpc_rate_limit import check_rpc_rate_limit  # noqa: E402
 from utils.validate_worker_env import WorkerEnvValidationError, validate_worker_env  # noqa: E402
 
@@ -115,21 +114,33 @@ def _grpc_message_size_options() -> list[tuple[str, int]]:
 	]
 
 
-def _preload_model_blocking() -> bool:
-	"""Load weights before accepting traffic (avoids OOM restart loop during background load)."""
+def _kick_off_model_warmup() -> None:
+	"""
+	Phase 2 / D8 — warm the model up AFTER the gRPC server is already accepting traffic, so the worker
+	is reachable and HealthCheck honestly reports `loading` (then `ready`, or `unavailable` on failure)
+	during the load. This replaces the old blocking preload that loaded BEFORE `server.start()` and so
+	left the worker unreachable (not "loading") for the whole load — the failure mode Part B described.
+
+	MFAI_PRELOAD_MODEL=0 keeps the lazy path (load on first request). MFAI_PRELOAD_BLOCKING=1 restores the
+	legacy block-until-warm behaviour (still after start, so it only delays readiness, not reachability);
+	a single-active-load is enough to avoid the OOM restart loop the old blocking comment guarded against,
+	because incoming Generate calls are rejected with MODEL_LOADING while `is_loading()` is true.
+	"""
 	flag = os.getenv("MFAI_PRELOAD_MODEL", "1").strip().lower()
 	if flag in ("0", "false", "no", "off"):
-		return True
+		logger.info("MFAI_PRELOAD_MODEL disabled — model loads lazily on first request.")
+		return
 	if _ai_service is None:
-		return False
-	try:
-		logger.info("Blocking preload of AI model (MFAI_PRELOAD_MODEL)")
-		_ai_service.preload()
-		logger.info("AI model ready for inference.")
-		return True
-	except Exception as exc:
-		logger.error("Blocking model preload failed: %s", redact_sensitive(str(exc)))
-		return False
+		logger.warning(
+			"AIModelService unavailable — cannot warm up; HealthCheck will report unavailable."
+		)
+		return
+	if os.getenv("MFAI_PRELOAD_BLOCKING", "").strip().lower() in ("1", "true", "yes", "on"):
+		logger.info("Blocking model warm-up (MFAI_PRELOAD_BLOCKING)")
+		_ai_service.warm_up()
+		return
+	_ai_service.start_background_warmup()
+	logger.info("Model warm-up started in background (HealthCheck reports loading until ready).")
 
 
 class HealthServiceServicer(health_pb2_grpc.HealthServiceServicer):
@@ -238,13 +249,12 @@ def serve():
 		if os.getenv("MFAI_ALLOW_INSECURE_GRPC", "").strip():
 			logger.warning("gRPC listening on insecure port (MFAI_ALLOW_INSECURE_GRPC)")
 
-	if not _preload_model_blocking():
-		logger.warning(
-			"Starting gRPC without a loaded model — HealthCheck will report unavailable."
-		)
-
+	# Phase 2 / D8 — start the server FIRST so it is reachable immediately, then warm the model up in the
+	# background; HealthCheck reports loading→ready honestly during the load instead of the worker being
+	# unreachable while a blocking preload ran before start().
 	server.start()
 	logger.info(f"gRPC server started on {server_address}")
+	_kick_off_model_warmup()
 
 	try:
 		server.wait_for_termination()

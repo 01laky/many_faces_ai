@@ -72,6 +72,26 @@ class RpcHandlers:
 		load_err = self._ai.load_error()
 		if load_err:
 			payload["error"] = load_err[:200]
+
+		# Phase 2 / D8+D18+D19 — finer-grained warm-up phase ("pulling"/"warming"/"ready"/"failed") and the
+		# startup time-to-ready, so the admin/stack can show "AI starting up" and observe cold-start latency.
+		# Read defensively: older AI doubles in tests don't expose these, so absent/non-typed values are omitted.
+		phase_fn = getattr(self._ai, "readiness_phase", None)
+		if callable(phase_fn):
+			try:
+				phase = phase_fn()
+				if isinstance(phase, str) and phase:
+					payload["phase"] = phase
+			except Exception:
+				pass
+		ttr_fn = getattr(self._ai, "time_to_ready_seconds", None)
+		if callable(ttr_fn):
+			try:
+				ttr = ttr_fn()
+				if isinstance(ttr, (int, float)):
+					payload["timeToReadySeconds"] = round(float(ttr), 1)
+			except Exception:
+				pass
 		return payload
 
 	def health_check(self, _request, _context):

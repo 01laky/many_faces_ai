@@ -8,6 +8,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — **version h
 
 | Version         | Theme                                 |
 | --------------- | ------------------------------------- |
+| [0.13.0](#0130) | Reliable startup: honest readiness + multi-model auto-pull + warm-up |
 | [0.12.0](#0120) | Host profile: all models by role (chat/helper/embed) |
 | [0.11.0](#0110) | Per-model GPU offload (7B GPU, helper CPU) |
 | [0.10.3](#0103) | Distributed RPC rate limit (Redis)    |
@@ -31,6 +32,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — **version h
 ### Changed
 
 ### Fixed
+
+---
+
+## [0.13.0]
+
+### Fixed
+
+- **Reliable startup + honest readiness** (Phase 2 of `operator-ai-degraded-failure-handling-and-startup-readiness-fix`; D6/D7/D8/D18/D19). The worker no longer reports "ready" merely because Ollama's `/api/show` returned, and the model is no longer left un-pulled on a fresh host — the two reasons the operator AI "did not come up with the stack". **(D6)** `scripts/pull_models.py` (generalising the helper-only `pull_helper_model.py`) pulls every model the worker needs at startup — chat + embed + helper — best-effort and idempotent (`/api/show` before `/api/pull`), de-duplicated, never failing the container; the entrypoint calls it. **(D7)** `AIModelService` now has a readiness state machine: `is_loaded()` is true only after a **real 1-token generation** succeeds, `is_loading()` is true while warming, and `is_unavailable()` on failure (the old `/api/show`-only check could report ready for a model that could not actually generate). **(D8)** the gRPC server starts **first** and the model warms up on a daemon thread, so the worker is reachable and `HealthCheck` honestly reports `loading→ready` during the load instead of being unreachable; `MFAI_PRELOAD_BLOCKING=1` restores the legacy block-until-warm. **(D18)** the warm-up pulls as a safety net (`phase=pulling`) and is bounded by `MFAI_WARMUP_TIMEOUT_SECONDS`, so cold start is an honest `loading`/`pulling`, never a silent indefinite `unavailable`. **(D19)** startup time-to-ready is recorded as the `ai_model_time_to_ready_seconds` metric, and the health payload now carries `phase` + `timeToReadySeconds`. New `services/ollama_pull.py` (shared by the entrypoint script and the warm-up). Tests: `tests/test_readiness_warmup.py`.
 
 ---
 
@@ -224,7 +233,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — **version h
 
 - Python gRPC HealthService; Docker dev stack; Ruff and pytest health tests.
 
-[Unreleased]: https://github.com/01laky/many_faces_ai/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/01laky/many_faces_ai/compare/v0.13.0...HEAD
 [0.10.3]: https://github.com/01laky/many_faces_ai/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/01laky/many_faces_ai/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/01laky/many_faces_ai/compare/v0.10.0...v0.10.1
@@ -239,4 +248,5 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — **version h
 [0.2.0]: https://github.com/01laky/many_faces_ai/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/01laky/many_faces_ai/releases/tag/v0.1.0
 [0.10.0]: https://github.com/01laky/many_faces_ai/compare/v0.9.0...v0.10.0
+[0.13.0]: https://github.com/01laky/many_faces_ai/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/01laky/many_faces_ai/compare/v0.11.0...v0.12.0

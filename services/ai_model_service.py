@@ -9,14 +9,26 @@ import json
 import logging
 import os
 import re
+import threading
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
+from services.ollama_pull import ensure_model_pulled, model_present
 from utils.env import env_float, env_int, env_str, keep_alive_value, ollama_base_url
 from utils.log_redaction import redact_sensitive
+from utils.metrics import observe_duration
 from utils.model_routing import PROFILE_HELPER, resolve_model
+
+# Phase 2 / D7 — honest readiness states. The model is only "ready" once a REAL generation has
+# succeeded (not merely that Ollama's /api/show returned), and "loading" while the background
+# warm-up is pulling/warming, so the health probe never reports a model that cannot yet generate.
+READINESS_NOT_STARTED = "not_started"
+READINESS_LOADING = "loading"
+READINESS_READY = "ready"
+READINESS_FAILED = "failed"
 
 logger = logging.getLogger(__name__)
 
@@ -271,23 +283,127 @@ class AIModelService:
 		except ValueError:
 			self._max_new_tokens_cap = DEFAULT_MAX_NEW_TOKENS_CAP
 
+		# Phase 2 / D7+D8+D18 — background-warm-up readiness state (guarded; read on the gRPC
+		# health thread, written on the warm-up thread). `_phase` carries a finer-grained label
+		# ("pulling"/"warming"/"ready"/"failed") surfaced in the health payload so the admin/stack
+		# can show "AI starting up" instead of a silent indefinite "unavailable".
+		self._readiness_lock = threading.Lock()
+		self._readiness = READINESS_NOT_STARTED
+		self._readiness_phase = ""
+		self._warmup_thread_started = False
+		self._time_to_ready_seconds: float | None = None
+
 	@property
 	def model_name(self) -> str:
 		return self._model_name
 
+	def _readiness_state(self) -> str:
+		with self._readiness_lock:
+			return self._readiness
+
 	def is_loading(self) -> bool:
-		return False
+		# Honest "loading" only while the background warm-up is actually in progress.
+		return self._readiness_state() == READINESS_LOADING
 
 	def is_unavailable(self) -> bool:
+		state = self._readiness_state()
+		if state == READINESS_FAILED:
+			return True
+		if state in (READINESS_READY, READINESS_LOADING):
+			return False
+		# NOT_STARTED — no warm-up was kicked off (e.g. MFAI_PRELOAD_MODEL=0, lazy/legacy path):
+		# fall back to a live /api/show probe so the per-request gate keeps its old behaviour.
 		self._ollama_model_available()
 		return self._load_error is not None
 
 	def load_error(self) -> str | None:
 		return self._load_error
 
+	def readiness_phase(self) -> str:
+		"""Finer-grained warm-up phase for the health payload (pulling/warming/ready/failed)."""
+		with self._readiness_lock:
+			return self._readiness_phase
+
+	def time_to_ready_seconds(self) -> float | None:
+		"""Wall time from warm-up start to the first successful generation (D19), or None."""
+		with self._readiness_lock:
+			return self._time_to_ready_seconds
+
+	def _set_readiness(self, state: str, phase: str) -> None:
+		with self._readiness_lock:
+			self._readiness = state
+			self._readiness_phase = phase
+
 	def preload(self) -> None:
-		"""Verify that the configured Ollama model is available."""
+		"""Verify that the configured Ollama model is available (cheap /api/show; legacy blocking path)."""
 		self._ensure_loaded()
+
+	def start_background_warmup(self) -> None:
+		"""
+		Phase 2 / D8+D18 — kick off the readiness warm-up on a daemon thread and return immediately, so
+		the gRPC server can start accepting health probes right away and honestly report `loading` until
+		a real generation has succeeded (instead of the old blocking preload that kept the server down —
+		and therefore "unreachable", not "loading" — during the model load). Idempotent.
+		"""
+		with self._readiness_lock:
+			if self._warmup_thread_started:
+				return
+			self._warmup_thread_started = True
+			self._readiness = READINESS_LOADING
+			self._readiness_phase = "warming"
+		threading.Thread(target=self.warm_up, name="ai-model-warmup", daemon=True).start()
+
+	def warm_up(self) -> bool:
+		"""
+		Phase 2 / D7+D18 — establish HONEST readiness: make the model present (pull as a safety net if the
+		entrypoint pull was missed), then prove it can actually GENERATE with a tiny 1-token request — only
+		then is the model "ready". Sets state loading→ready/failed, records time-to-ready (D19), and is
+		bounded by MFAI_WARMUP_TIMEOUT_SECONDS so it never hangs as a silent indefinite "unavailable".
+		Returns True on success. Never raises (the server keeps running regardless).
+		"""
+		started = time.monotonic()
+		warm_timeout = env_float("MFAI_WARMUP_TIMEOUT_SECONDS", 180.0)
+		try:
+			# Safety net for D6: if the entrypoint pull was skipped or the model is still absent, pull it
+			# here and report `pulling` so a cold start is "AI loading", never a silent "unavailable".
+			if not model_present(self._ollama_base_url, self._model_name, timeout=10.0):
+				self._set_readiness(READINESS_LOADING, "pulling")
+				ensure_model_pulled(
+					self._ollama_base_url,
+					self._model_name,
+					pull_timeout=warm_timeout,
+					log=lambda m: logger.info("warm-up pull: %s", m),
+				)
+
+			self._set_readiness(READINESS_LOADING, "warming")
+			# A real 1-token generation — proves the weights actually load and the model produces, which
+			# a bare /api/show (the old readiness check) does NOT. Raises on any transport/model failure.
+			self._ollama_post_json(
+				"/api/generate",
+				{
+					"model": self._model_name,
+					"prompt": "ok",
+					"stream": False,
+					"keep_alive": _keep_alive(),
+					"options": {"num_predict": 1},
+				},
+				rpc_deadline_seconds=warm_timeout,
+			)
+		except Exception as exc:
+			self._load_error = str(exc)
+			self._set_readiness(READINESS_FAILED, "failed")
+			logger.error("AI model warm-up failed: %s", redact_sensitive(str(exc)))
+			return False
+
+		elapsed = time.monotonic() - started
+		with self._readiness_lock:
+			self._readiness = READINESS_READY
+			self._readiness_phase = "ready"
+			self._time_to_ready_seconds = elapsed
+			self._load_error = None
+		observe_duration("ai_model_time_to_ready_seconds", elapsed)
+		logger.info("AI model ready in %.1fs (real generation succeeded).", elapsed)
+		return True
 
 	def _ensure_loaded(self):
 		self._ensure_ollama_ready()
@@ -609,4 +725,12 @@ class AIModelService:
 			raise RuntimeError(f"Ollama stream transport error: {exc.reason}") from exc
 
 	def is_loaded(self) -> bool:
+		state = self._readiness_state()
+		if state == READINESS_READY:
+			return True
+		if state in (READINESS_LOADING, READINESS_FAILED):
+			# Honest: a model still warming up (or whose warm-up failed) is NOT ready, even if its
+			# weights exist on disk — the old /api/show check would have wrongly reported ready here.
+			return False
+		# NOT_STARTED — no background warm-up ran (lazy/legacy path): keep the original /api/show probe.
 		return self._ollama_model_available()
